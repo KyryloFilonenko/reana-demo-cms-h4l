@@ -1,27 +1,35 @@
-# Note that if you are working on the analysis development locally, i.e. outside
-# of the REANA platform, you can proceed as follows:
-#
-#   $ cd reana-demo-cms-h4l
-#   $ mkdir snakemake-local-run
-#   $ cd snakemake-local-run
-#   $ virtualenv ~/.virtualenvs/cms-h4l-snakemake
-#   $ source ~/.virtualenvs/cms-h4l-snakemake/bin/activate
-#   $ pip install snakemake
-#   $ cp -a ../code ../data .
-#   $ snakemake -s ../workflow/snakemake/Snakefile -p --cores 4 --use-singularity
-#           --configfile ../workflow/snakemake/input.yaml
+import json
 
+JSON_2011 = "Cert_160404-180252_7TeV_ReRecoNov08_Collisions11_JSON.txt"
+JSON_2012 = "Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt"
+
+# recid of each CERN Open Data record the dataset was fetched from, kept here
+# for traceability (see fetch_file_index.py)
+DATASETS = {
+    "DoubleMu_Run2011A":       {"recid": 17,   "json": JSON_2011},
+    "DoubleElectron_Run2011A": {"recid": 16,   "json": JSON_2011},
+    "DoubleMuParked_Run2012B": {"recid": 6004, "json": JSON_2012},
+    "DoubleMuParked_Run2012C": {"recid": 6030, "json": JSON_2012},
+    "DoubleElectron_Run2012B": {"recid": 6003, "json": JSON_2012},
+    "DoubleElectron_Run2012C": {"recid": 6029, "json": JSON_2012},
+}
+
+CHUNKS = {}
+for dataset in DATASETS:
+    with open(f"workflow/chunks_{dataset}.json") as f:
+        CHUNKS[dataset] = json.load(f)
 
 rule all:
     input:
-        "results/mass4l_combine_userlvl3.pdf"
+        "results/mass4l_combine_user.pdf"
 
 rule scram:
     input:
         config["data"],
         config["code"]
     output:
-        touch("results/scramdone.txt")
+        touch("results/scramdone.txt"),
+        directory("CMSSW_5_3_32")
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
     shell:
@@ -32,51 +40,103 @@ rule scram:
         "&& cp -r ../../code/HiggsExample20112012 . "
         "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
         "&& scram b "
-        "&& cd ../Level3 "
+        "&& cd ../Level4 "
         "&& mkdir -p ../../../../results "
 
-rule analyze_data:
+rule analyze_chunk:
     input:
         config["data"],
         config["code"],
-        "results/scramdone.txt"
+        "workflow/chunk_lists/{dataset}/{chunk_id}.txt"
     output:
-        "results/DoubleMuParked2012C_10000_Higgs.root"
+        "results/chunks/{dataset}/{chunk_id}.root"
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    params:
+        json_file=lambda wc: DATASETS[wc.dataset]["json"]
     shell:
-        "source /opt/cms/cmsset_default.sh "
+        "WORKDIR=$(pwd) "
+        "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "
+        "&& cd work_{wildcards.dataset}_{wildcards.chunk_id} "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& scramv1 project CMSSW CMSSW_5_3_32 "
         "&& cd CMSSW_5_3_32/src "
         "&& eval `scramv1 runtime -sh` "
+        "&& cp -r $WORKDIR/code/HiggsExample20112012 . "
         "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
-        "&& cd ../Level3 "
-        "&& cmsRun demoanalyzer_cfg_level3data.py"
+        "&& scram b "
+        "&& cd ../Level4 "
+        "&& mkdir -p $WORKDIR/results/chunks/{wildcards.dataset} "
+        "&& cp $WORKDIR/workflow/chunk_lists/{wildcards.dataset}/{wildcards.chunk_id}.txt this_chunk_index.txt "
+        "&& sed "
+        "-e 's|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/CMS_Run2012C_DoubleMuParked_AOD_22Jan2013-v1_10000_file_index.txt|this_chunk_index.txt|' "
+        "-e \"s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|$WORKDIR/data/{params.json_file}|\" "
+        "-e \"s|'HiggsDemoAnalyzer'|'HiggsDemoAnalyzerGit'|\" "
+        "demoanalyzer_cfg_level4data.py > demoanalyzer_cfg_level4data_chunk.py "
+        "&& cmsRun demoanalyzer_cfg_level4data_chunk.py "
+        "&& cp *.root $WORKDIR/results/chunks/{wildcards.dataset}/{wildcards.chunk_id}.root"
 
-rule analyze_mc:
+rule merge_dataset:
     input:
-        config["data"],
-        config["code"],
-        "results/scramdone.txt"
+        lambda wc: expand(
+            "results/chunks/{d}/{c}.root", d=wc.dataset, c=list(CHUNKS[wc.dataset].keys())
+        )
     output:
-        "results/Higgs4L1file.root"
+        "results/{dataset}_full.root"
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
     shell:
         "source /opt/cms/cmsset_default.sh "
         "&& cd CMSSW_5_3_32/src "
         "&& eval `scramv1 runtime -sh` "
-        "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
-        "&& cd ../Level3 "
-        "&& cmsRun demoanalyzer_cfg_level3MC.py"
+        "&& hadd -f ../../{output} ../../results/chunks/{wildcards.dataset}/*.root"
+
+# The analysis strategy (see README) reads the 4mu and 2mu2e final states from
+# the DoubleMu(Parked) primary datasets and the 4e final state from the
+# DoubleElectron primary datasets, to avoid double-counting from overlapping
+# triggers. 2012 has two eras (B+C) per primary dataset that get combined into
+# one file; 2011 has only era A, so it passes through merge_dataset directly.
+
+rule combine_2012_muon:
+    input:
+        "results/DoubleMuParked_Run2012B_full.root",
+        "results/DoubleMuParked_Run2012C_full.root"
+    output:
+        "results/DoubleMu12_full.root"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../{input}"
+
+rule combine_2012_electron:
+    input:
+        "results/DoubleElectron_Run2012B_full.root",
+        "results/DoubleElectron_Run2012C_full.root"
+    output:
+        "results/DoubleE12_full.root"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../{input}"
 
 rule make_plot:
     input:
         config["data"],
         config["code"],
-        "results/DoubleMuParked2012C_10000_Higgs.root",
-        "results/Higgs4L1file.root"
+        "results/scramdone.txt",
+        "CMSSW_5_3_32",
+        "results/DoubleMu12_full.root",
+        "results/DoubleE12_full.root",
+        "results/DoubleMu_Run2011A_full.root",
+        "results/DoubleElectron_Run2011A_full.root"
     output:
-        "results/mass4l_combine_userlvl3.pdf"
+        "results/mass4l_combine_user.pdf"
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
     shell:
@@ -84,5 +144,11 @@ rule make_plot:
         "&& cd CMSSW_5_3_32/src "
         "&& eval `scramv1 runtime -sh` "
         "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
-        "&& cd ../Level3 "
-        "&& root -b -l -q ./M4Lnormdatall_lvl3.cc"
+        "&& cd ../Level4 "
+        "&& cp ../../../../data/*.root . "
+        "&& cp ../../../../results/DoubleMu12_full.root DoubleMu12.root "
+        "&& cp ../../../../results/DoubleE12_full.root DoubleE12.root "
+        "&& cp ../../../../results/DoubleMu_Run2011A_full.root DoubleMu11.root "
+        "&& cp ../../../../results/DoubleElectron_Run2011A_full.root DoubleE11.root "
+        "&& root -b -l -q ./M4Lnormdatall.cc "
+        "&& cp mass4l_combine_user.pdf ../../../../results/"

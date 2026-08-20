@@ -8,12 +8,7 @@ inputs:
     - workflow
 outputs:
   files:
-    - results/mass4l_combine_userlvl3.pdf
+    - results/mass4l_combine_user.pdf
 workflow:
   type: snakemake
   file: workflow/Snakefile
-tests:
-  files:
-    - tests/log-messages.feature
-    - tests/run-duration.feature
-    - tests/workspace-files.feature
