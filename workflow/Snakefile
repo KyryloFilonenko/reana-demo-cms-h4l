@@ -1,31 +1,24 @@
 JSON_2011 = "Cert_160404-180252_7TeV_ReRecoNov08_Collisions11_JSON.txt"
 JSON_2012 = "Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt"
 
-# recid of each CERN Open Data record the dataset was fetched from, kept here
-# for traceability (see fetch_file_index.py)
-DATASETS = {
-    "DoubleMu_Run2011A":       {"recid": 17,   "json": JSON_2011},
-    "DoubleElectron_Run2011A": {"recid": 16,   "json": JSON_2011},
-    "DoubleMuParked_Run2012B": {"recid": 6004, "json": JSON_2012},
-    "DoubleMuParked_Run2012C": {"recid": 6030, "json": JSON_2012},
-    "DoubleElectron_Run2012B": {"recid": 6003, "json": JSON_2012},
-    "DoubleElectron_Run2012C": {"recid": 6029, "json": JSON_2012},
-}
-
-
-def chunk_outputs(wc):
-    """List each chunk's expected .root output for one dataset.
-
-    Discovered via glob_wildcards (resolved lazily, the same way Snakemake
-    resolves normal rule paths) instead of reading workflow/chunks_*.json at
-    parse time - eager top-level file reads broke reana-client's local
-    Snakefile validation, which parses the file from a different working
-    directory than actual execution uses.
-    """
-    chunk_ids = glob_wildcards(
-        f"workflow/chunk_lists/{wc.dataset}/{{chunk_id}}.txt"
-    ).chunk_id
-    return expand("results/chunks/{d}/{c}.root", d=wc.dataset, c=chunk_ids)
+# recid of each CERN Open Data record the dataset was fetched from, and the
+# chunk count produced by `make_chunks.py` for each (see fetch_file_index.py
+# and workflow/chunks_<dataset>.json), kept here for traceability:
+#   DoubleMu_Run2011A        recid 17    5 chunks  (JSON_2011)
+#   DoubleElectron_Run2011A  recid 16    6 chunks  (JSON_2011)
+#   DoubleMuParked_Run2012B  recid 6004  8 chunks  (JSON_2012)
+#   DoubleMuParked_Run2012C  recid 6030 10 chunks  (JSON_2012)
+#   DoubleElectron_Run2012B  recid 6003  6 chunks  (JSON_2012)
+#   DoubleElectron_Run2012C  recid 6029  8 chunks  (JSON_2012)
+#
+# Rule input/output/params must be static (plain strings/lists with
+# {wildcards}), not Python functions or lambdas: reana-client serializes
+# each rule to JSON when creating the workflow, and "Object of type function
+# is not JSON serializable" is fatal there. That's why analyze_chunk is
+# split in two by year (static JSON filename per rule, picked via
+# wildcard_constraints) instead of a params lambda, and why merge_dataset is
+# unrolled per dataset with a precomputed chunk_id list instead of an input
+# function reading workflow/chunks_<dataset>.json at DAG-build time.
 
 rule all:
     input:
@@ -51,17 +44,17 @@ rule scram:
         "&& cd ../Level4 "
         "&& mkdir -p ../../../../results "
 
-rule analyze_chunk:
+rule analyze_chunk_2011:
     input:
         config["data"],
         config["code"],
         "workflow/chunk_lists/{dataset}/{chunk_id}.txt"
     output:
         "results/chunks/{dataset}/{chunk_id}.root"
+    wildcard_constraints:
+        dataset="DoubleMu_Run2011A|DoubleElectron_Run2011A"
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
-    params:
-        json_file=lambda wc: DATASETS[wc.dataset]["json"]
     shell:
         "WORKDIR=$(pwd) "
         "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "
@@ -78,30 +71,155 @@ rule analyze_chunk:
         "&& cp $WORKDIR/workflow/chunk_lists/{wildcards.dataset}/{wildcards.chunk_id}.txt this_chunk_index.txt "
         "&& sed "
         "-e 's|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/CMS_Run2012C_DoubleMuParked_AOD_22Jan2013-v1_10000_file_index.txt|this_chunk_index.txt|' "
-        "-e \"s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|$WORKDIR/data/{params.json_file}|\" "
+        "-e \"s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|$WORKDIR/data/Cert_160404-180252_7TeV_ReRecoNov08_Collisions11_JSON.txt|\" "
         "-e \"s|'HiggsDemoAnalyzer'|'HiggsDemoAnalyzerGit'|\" "
         "demoanalyzer_cfg_level4data.py > demoanalyzer_cfg_level4data_chunk.py "
         "&& cmsRun demoanalyzer_cfg_level4data_chunk.py "
         "&& cp *.root $WORKDIR/results/chunks/{wildcards.dataset}/{wildcards.chunk_id}.root"
 
-rule merge_dataset:
+rule analyze_chunk_2012:
     input:
-        chunk_outputs
+        config["data"],
+        config["code"],
+        "workflow/chunk_lists/{dataset}/{chunk_id}.txt"
     output:
-        "results/{dataset}_full.root"
+        "results/chunks/{dataset}/{chunk_id}.root"
+    wildcard_constraints:
+        dataset="DoubleMuParked_Run2012B|DoubleMuParked_Run2012C|DoubleElectron_Run2012B|DoubleElectron_Run2012C"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "WORKDIR=$(pwd) "
+        "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "
+        "&& cd work_{wildcards.dataset}_{wildcards.chunk_id} "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& scramv1 project CMSSW CMSSW_5_3_32 "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& cp -r $WORKDIR/code/HiggsExample20112012 . "
+        "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
+        "&& scram b "
+        "&& cd ../Level4 "
+        "&& mkdir -p $WORKDIR/results/chunks/{wildcards.dataset} "
+        "&& cp $WORKDIR/workflow/chunk_lists/{wildcards.dataset}/{wildcards.chunk_id}.txt this_chunk_index.txt "
+        "&& sed "
+        "-e 's|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/CMS_Run2012C_DoubleMuParked_AOD_22Jan2013-v1_10000_file_index.txt|this_chunk_index.txt|' "
+        "-e \"s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|$WORKDIR/data/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|\" "
+        "-e \"s|'HiggsDemoAnalyzer'|'HiggsDemoAnalyzerGit'|\" "
+        "demoanalyzer_cfg_level4data.py > demoanalyzer_cfg_level4data_chunk.py "
+        "&& cmsRun demoanalyzer_cfg_level4data_chunk.py "
+        "&& cp *.root $WORKDIR/results/chunks/{wildcards.dataset}/{wildcards.chunk_id}.root"
+
+rule merge_DoubleMu_Run2011A:
+    input:
+        expand(
+            "results/chunks/DoubleMu_Run2011A/{c}.root",
+            c=["chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003", "chunk_0004"],
+        )
+    output:
+        "results/DoubleMu_Run2011A_full.root"
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
     shell:
         "source /opt/cms/cmsset_default.sh "
         "&& cd CMSSW_5_3_32/src "
         "&& eval `scramv1 runtime -sh` "
-        "&& hadd -f ../../{output} ../../results/chunks/{wildcards.dataset}/*.root"
+        "&& hadd -f ../../{output} ../../results/chunks/DoubleMu_Run2011A/*.root"
+
+rule merge_DoubleElectron_Run2011A:
+    input:
+        expand(
+            "results/chunks/DoubleElectron_Run2011A/{c}.root",
+            c=["chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003", "chunk_0004", "chunk_0005"],
+        )
+    output:
+        "results/DoubleElectron_Run2011A_full.root"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../results/chunks/DoubleElectron_Run2011A/*.root"
+
+rule merge_DoubleMuParked_Run2012B:
+    input:
+        expand(
+            "results/chunks/DoubleMuParked_Run2012B/{c}.root",
+            c=[
+                "chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003",
+                "chunk_0004", "chunk_0005", "chunk_0006", "chunk_0007",
+            ],
+        )
+    output:
+        "results/DoubleMuParked_Run2012B_full.root"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../results/chunks/DoubleMuParked_Run2012B/*.root"
+
+rule merge_DoubleMuParked_Run2012C:
+    input:
+        expand(
+            "results/chunks/DoubleMuParked_Run2012C/{c}.root",
+            c=[
+                "chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003", "chunk_0004",
+                "chunk_0005", "chunk_0006", "chunk_0007", "chunk_0008", "chunk_0009",
+            ],
+        )
+    output:
+        "results/DoubleMuParked_Run2012C_full.root"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../results/chunks/DoubleMuParked_Run2012C/*.root"
+
+rule merge_DoubleElectron_Run2012B:
+    input:
+        expand(
+            "results/chunks/DoubleElectron_Run2012B/{c}.root",
+            c=["chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003", "chunk_0004", "chunk_0005"],
+        )
+    output:
+        "results/DoubleElectron_Run2012B_full.root"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../results/chunks/DoubleElectron_Run2012B/*.root"
+
+rule merge_DoubleElectron_Run2012C:
+    input:
+        expand(
+            "results/chunks/DoubleElectron_Run2012C/{c}.root",
+            c=[
+                "chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003",
+                "chunk_0004", "chunk_0005", "chunk_0006", "chunk_0007",
+            ],
+        )
+    output:
+        "results/DoubleElectron_Run2012C_full.root"
+    container:
+        "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    shell:
+        "source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../results/chunks/DoubleElectron_Run2012C/*.root"
 
 # The analysis strategy (see README) reads the 4mu and 2mu2e final states from
 # the DoubleMu(Parked) primary datasets and the 4e final state from the
 # DoubleElectron primary datasets, to avoid double-counting from overlapping
 # triggers. 2012 has two eras (B+C) per primary dataset that get combined into
-# one file; 2011 has only era A, so it passes through merge_dataset directly.
+# one file; 2011 has only era A, so its merge_dataset output is used directly.
 
 rule combine_2012_muon:
     input:
