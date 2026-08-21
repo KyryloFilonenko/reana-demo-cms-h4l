@@ -233,7 +233,7 @@ rule combine_2012_muon:
         "source /opt/cms/cmsset_default.sh "
         "&& cd CMSSW_5_3_32/src "
         "&& eval `scramv1 runtime -sh` "
-        "&& hadd -f ../../{output} ../../{input}"
+        "&& hadd -f ../../{output} ../../{input[0]} ../../{input[1]}"
 
 rule combine_2012_electron:
     input:
@@ -247,7 +247,7 @@ rule combine_2012_electron:
         "source /opt/cms/cmsset_default.sh "
         "&& cd CMSSW_5_3_32/src "
         "&& eval `scramv1 runtime -sh` "
-        "&& hadd -f ../../{output} ../../{input}"
+        "&& hadd -f ../../{output} ../../{input[0]} ../../{input[1]}"
 
 rule make_plot:
     input:
