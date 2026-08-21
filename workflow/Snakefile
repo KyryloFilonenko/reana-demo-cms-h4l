@@ -112,6 +112,8 @@ rule analyze_chunk_2012:
 
 rule merge_DoubleMu_Run2011A:
     input:
+        "results/scramdone.txt",
+        "CMSSW_5_3_32",
         expand(
             "results/chunks/DoubleMu_Run2011A/{c}.root",
             c=["chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003", "chunk_0004"],
@@ -128,6 +130,8 @@ rule merge_DoubleMu_Run2011A:
 
 rule merge_DoubleElectron_Run2011A:
     input:
+        "results/scramdone.txt",
+        "CMSSW_5_3_32",
         expand(
             "results/chunks/DoubleElectron_Run2011A/{c}.root",
             c=["chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003", "chunk_0004", "chunk_0005"],
@@ -144,6 +148,8 @@ rule merge_DoubleElectron_Run2011A:
 
 rule merge_DoubleMuParked_Run2012B:
     input:
+        "results/scramdone.txt",
+        "CMSSW_5_3_32",
         expand(
             "results/chunks/DoubleMuParked_Run2012B/{c}.root",
             c=[
@@ -163,6 +169,8 @@ rule merge_DoubleMuParked_Run2012B:
 
 rule merge_DoubleMuParked_Run2012C:
     input:
+        "results/scramdone.txt",
+        "CMSSW_5_3_32",
         expand(
             "results/chunks/DoubleMuParked_Run2012C/{c}.root",
             c=[
@@ -182,6 +190,8 @@ rule merge_DoubleMuParked_Run2012C:
 
 rule merge_DoubleElectron_Run2012B:
     input:
+        "results/scramdone.txt",
+        "CMSSW_5_3_32",
         expand(
             "results/chunks/DoubleElectron_Run2012B/{c}.root",
             c=["chunk_0000", "chunk_0001", "chunk_0002", "chunk_0003", "chunk_0004", "chunk_0005"],
@@ -198,6 +208,8 @@ rule merge_DoubleElectron_Run2012B:
 
 rule merge_DoubleElectron_Run2012C:
     input:
+        "results/scramdone.txt",
+        "CMSSW_5_3_32",
         expand(
             "results/chunks/DoubleElectron_Run2012C/{c}.root",
             c=[
@@ -224,7 +236,9 @@ rule merge_DoubleElectron_Run2012C:
 rule combine_2012_muon_v2:
     input:
         "results/DoubleMuParked_Run2012B_full.root",
-        "results/DoubleMuParked_Run2012C_full.root"
+        "results/DoubleMuParked_Run2012C_full.root",
+        "results/scramdone.txt",
+        "CMSSW_5_3_32"
     output:
         "results/DoubleMu12_combined.root"
     container:
@@ -238,7 +252,9 @@ rule combine_2012_muon_v2:
 rule combine_2012_electron_v2:
     input:
         "results/DoubleElectron_Run2012B_full.root",
-        "results/DoubleElectron_Run2012C_full.root"
+        "results/DoubleElectron_Run2012C_full.root",
+        "results/scramdone.txt",
+        "CMSSW_5_3_32"
     output:
         "results/DoubleE12_combined.root"
     container:
