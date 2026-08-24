@@ -74,6 +74,13 @@ to EOS from outside the Kubernetes cluster. This pilot runs the same CMSSW steps
 as a real chunk job but over one AOD file, so any of those problems surface in
 about a minute instead of after four hours.
 
+The HTCondor steps take the CMSSW image from
+`/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest`
+instead of Docker Hub. Pulling and converting the multi-gigabyte `docker://`
+image on the condor node itself was observed to fail after about twelve minutes
+without emitting a single log line, whereas the unpacked CVMFS tree is already
+present on every node.
+
 ```bash
 reana-client create -n htcondor-pilot --file reana_htcondor_pilot.yaml
 export REANA_WORKON=htcondor-pilot
