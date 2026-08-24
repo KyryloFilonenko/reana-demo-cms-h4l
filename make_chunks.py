@@ -25,6 +25,7 @@ for i in range(0, len(files), args.chunk_size):
 
 with open(args.output_json, "w", newline="\n") as f:
     json.dump(chunks, f, indent=2)
+    f.write("\n")  # keep the file prettier-clean (CI runs `prettier -c .`)
 
 print(f"Файлів: {len(files)}, чанків: {len(chunks)}")
 print(f"Списки чанків записано у {args.lists_dir}/")
