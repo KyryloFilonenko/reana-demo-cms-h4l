@@ -19,6 +19,16 @@ JSON_2012 = "Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt"
 # wildcard_constraints) instead of a params lambda, and why merge_dataset is
 # unrolled per dataset with a precomputed chunk_id list instead of an input
 # function reading workflow/chunks_<dataset>.json at DAG-build time.
+#
+# The 43 analyze_chunk jobs (~4h each at the measured 45s/file) run on CERN
+# HTCondor, which offers far more parallel slots than the Kubernetes quota.
+# This needs CERN_USER/CERN_KEYTAB uploaded as REANA secrets; the HTCondor
+# backend then provides the Kerberos token to the job automatically.
+# `htcondor_max_runtime` is read by the server-side workflow engine from these
+# resources at execution time -- note that reana-client's own spec preview
+# does not echo it back, only compute_backend, so its absence there is normal.
+# The short steps (scram, merge, combine, make_plot) stay on Kubernetes: they
+# take seconds and share the CMSSW build area living in the workspace.
 
 rule all:
     input:
@@ -55,6 +65,9 @@ rule analyze_chunk_2011:
         dataset="DoubleMu_Run2011A|DoubleElectron_Run2011A"
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    resources:
+        compute_backend="htcondorcern",
+        htcondor_max_runtime="tomorrow"
     shell:
         "WORKDIR=$(pwd) "
         "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "
@@ -88,6 +101,9 @@ rule analyze_chunk_2012:
         dataset="DoubleMuParked_Run2012B|DoubleMuParked_Run2012C|DoubleElectron_Run2012B|DoubleElectron_Run2012C"
     container:
         "docker://docker.io/cmsopendata/cmssw_5_3_32"
+    resources:
+        compute_backend="htcondorcern",
+        htcondor_max_runtime="tomorrow"
     shell:
         "WORKDIR=$(pwd) "
         "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "
