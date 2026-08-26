@@ -1,0 +1,24 @@
+# The working hello world example with exactly one field changed: the image is
+# taken from cvmfs instead of Docker Hub. Everything else -- inputs, command,
+# step name, backend -- is identical to the run that finishes normally.
+#
+# Every job of ours that used a /cvmfs/ image hung forever, but none of them
+# differed from a working job by the image alone, so the image path was never
+# actually isolated as the cause. This does that. If this hangs, a /cvmfs/
+# environment is enough on its own to break a job that is otherwise fine.
+version: 0.8.0
+inputs:
+  files:
+    - helloworld.py
+outputs:
+  files:
+    - results/greetings.txt
+workflow:
+  type: serial
+  specification:
+    steps:
+      - name: reana_demo_helloworld_htcondorcern
+        environment: "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
+        compute_backend: htcondorcern
+        commands:
+          - mkdir -p results && python helloworld.py | tee results/greetings.txt
