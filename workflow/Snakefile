@@ -36,6 +36,15 @@ JSON_2012 = "Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt"
 # the unpacked.cern.ch tree is already present on every node, so there is
 # nothing to download. Kubernetes steps keep the docker.io image, which REANA
 # pulls once for the whole cluster.
+#
+# A /cvmfs/unpacked.cern.ch/... image only works with `unpacked_img=True` in
+# resources: it tells REANA to run the job as `singularity exec --bind /cvmfs
+# --bind /eos <image> ...` instead of the HTCondor Docker Universe. Without the
+# hint the job hangs in `running` forever with no logs. Singularity also
+# ignores the image ENTRYPOINT, which sidesteps reana-job-controller#531 -- the
+# CMSSW entrypoint cds into $CMSSW_BASE/src before the given command runs, so
+# under Docker Universe HTCondor's relative ./job_wrapper.sh is looked for in
+# the wrong directory and the job dies with "No such file or directory".
 
 rule all:
     input:
@@ -74,7 +83,8 @@ rule analyze_chunk_2011:
         "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
     resources:
         compute_backend="htcondorcern",
-        htcondor_max_runtime="tomorrow"
+        htcondor_max_runtime="tomorrow",
+        unpacked_img=True
     shell:
         "WORKDIR=$(pwd) "
         "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "
@@ -110,7 +120,8 @@ rule analyze_chunk_2012:
         "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
     resources:
         compute_backend="htcondorcern",
-        htcondor_max_runtime="tomorrow"
+        htcondor_max_runtime="tomorrow",
+        unpacked_img=True
     shell:
         "WORKDIR=$(pwd) "
         "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "

@@ -21,6 +21,10 @@ workflow:
       - name: htcondor_pilot
         environment: "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
         compute_backend: htcondorcern
+        # Required for a /cvmfs/unpacked.cern.ch/... image: run it through
+        # `singularity exec` instead of the HTCondor Docker Universe. Without
+        # it the job hangs in `running` with no logs.
+        unpacked_img: true
         htcondor_max_runtime: "longlunch"
         commands:
           - source /opt/cms/cmsset_default.sh && scramv1 project CMSSW

@@ -81,6 +81,21 @@ image on the condor node itself was observed to fail after about twelve minutes
 without emitting a single log line, whereas the unpacked CVMFS tree is already
 present on every node.
 
+A `/cvmfs/unpacked.cern.ch/...` image **must** be paired with `unpacked_img`
+set in the step's `resources` (`unpacked_img=True` in the Snakefile,
+`unpacked_img: true` in a serial spec). That flag makes REANA run the job as
+`singularity exec --bind /cvmfs --bind /eos <image> ...` instead of through the
+HTCondor Docker Universe. Without it the job sits in `running` forever with no
+logs and is not killed by `htcondor_max_runtime`. Singularity also ignores the
+image `ENTRYPOINT`, so it sidesteps
+[reanahub/reana-job-controller#531](https://github.com/reanahub/reana-job-controller/issues/531):
+the CMSSW entrypoint `cd`s into `$CMSSW_BASE/src` before running the given
+command, and under Docker Universe HTCondor's relative `./job_wrapper.sh` is
+then looked for in the wrong directory, so a Docker Hub image dies immediately
+with `job_wrapper.sh: No such file or directory`. That REANA-side fix is
+expected in the 0.95.0 release; until the CERN deployment ships it, the
+`unpacked_img` + CVMFS route is the only one that works.
+
 ```bash
 reana-client create -n htcondor-pilot --file reana_htcondor_pilot.yaml
 export REANA_WORKON=htcondor-pilot

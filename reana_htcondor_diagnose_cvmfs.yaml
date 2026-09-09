@@ -23,5 +23,8 @@ workflow:
       - name: diagnose
         environment: "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
         compute_backend: htcondorcern
+        # Run the unpacked image through `singularity exec`; also makes
+        # Singularity ignore the CMSSW entrypoint.
+        unpacked_img: true
         commands:
           - bash htcondor_diagnose.sh
