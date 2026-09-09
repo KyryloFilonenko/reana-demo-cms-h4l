@@ -21,13 +21,17 @@ measured 45 s per file, which puts a chunk at about 4 hours. The full workflow
 is 53 steps: 43 `analyze_chunk` jobs, 6 per-dataset merges, 2 era combinations
 (2012 B+C), one CMSSW build and the final plot.
 
-The 43 `analyze_chunk` jobs run on **CERN HTCondor**, which offers far more
-parallel slots than the Kubernetes quota. The short steps stay on Kubernetes.
+Every step, including the 43 `analyze_chunk` jobs, runs on **Kubernetes**. CERN
+HTCondor would give far more parallel slots, but its backend on
+reana.cern.ch 0.9.4 cannot run these jobs yet — see
+[Later: analyze_chunk on HTCondor](#later-analyze_chunk-on-htcondor) for why and
+for the switch to make once the server ships the fix.
 
 ## 1. Prerequisites
 
 - A REANA account at <https://reana.cern.ch> and its access token
-- A CERN computing account (needed for the HTCondor backend)
+- A CERN computing account (only for the future HTCondor backend; not needed
+  for the Kubernetes run below)
 
 ```bash
 git clone https://github.com/KyryloFilonenko/reana-demo-cms-h4l.git
@@ -43,7 +47,12 @@ export REANA_ACCESS_TOKEN=<your-token>
 reana-client ping   # verify the connection and token
 ```
 
-## 2. Kerberos credentials for HTCondor
+## 2. Kerberos credentials for HTCondor (already done)
+
+Only needed for the future HTCondor path; the Kubernetes run in section 3 does
+not use it. The secrets (`CERN_USER`, `CERN_KEYTAB`, `.keytab`) are already
+uploaded on this account — `reana-client secrets-list` shows them. Kept here
+for reference / re-doing on another account.
 
 CERN HTCondor authenticates with a Kerberos keytab. This is a one-time setup;
 without it no HTCondor job will start. On `lxplus.cern.ch`:
@@ -66,74 +75,76 @@ reana-client secrets-list
 injects the Kerberos token into each job on its own, so the workflow
 specification does not need a `kerberos: true` flag.
 
-## 3. Probe HTCondor with a single file
+## 3. Run the full analysis
 
-HTCondor adds three unknowns that the Kubernetes runs never exercised: Kerberos
-authentication, running the container image on a condor node, and XRootD reach
-to EOS from outside the Kubernetes cluster. This pilot runs the same CMSSW steps
-as a real chunk job but over one AOD file, so any of those problems surface in
-about a minute instead of after four hours.
-
-The HTCondor steps take the CMSSW image from
-`/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest`
-instead of Docker Hub. Pulling and converting the multi-gigabyte `docker://`
-image on the condor node itself was observed to fail after about twelve minutes
-without emitting a single log line, whereas the unpacked CVMFS tree is already
-present on every node.
-
-A `/cvmfs/unpacked.cern.ch/...` image **must** be paired with `unpacked_img`
-set in the step's `resources` (`unpacked_img=True` in the Snakefile,
-`unpacked_img: true` in a serial spec). That flag makes REANA run the job as
-`singularity exec --bind /cvmfs --bind /eos <image> ...` instead of through the
-HTCondor Docker Universe. Without it the job sits in `running` forever with no
-logs and is not killed by `htcondor_max_runtime`. Singularity also ignores the
-image `ENTRYPOINT`, so it sidesteps
-[reanahub/reana-job-controller#531](https://github.com/reanahub/reana-job-controller/issues/531):
-the CMSSW entrypoint `cd`s into `$CMSSW_BASE/src` before running the given
-command, and under Docker Universe HTCondor's relative `./job_wrapper.sh` is
-then looked for in the wrong directory, so a Docker Hub image dies immediately
-with `job_wrapper.sh: No such file or directory`. That REANA-side fix is
-expected in the 0.95.0 release; until the CERN deployment ships it, the
-`unpacked_img` + CVMFS route is the only one that works.
+The whole workflow is the default `reana.yaml` (Snakemake). Every step runs on
+Kubernetes; the `analyze_chunk` jobs ask for `kubernetes_memory_limit="4Gi"`.
 
 ```bash
-reana-client create -n htcondor-pilot --file reana_htcondor_pilot.yaml
-export REANA_WORKON=htcondor-pilot
-reana-client upload
-reana-client start
-
-reana-client status
-reana-client download results/htcondor_pilot_timing.txt
-cat results/htcondor_pilot_timing.txt      # DURATION_SECONDS=<N>
-```
-
-If `DURATION_SECONDS` is far above the 45 s measured on Kubernetes, condor nodes
-are slower than assumed and the chunk size in `workflow/chunk_lists/` should be
-regenerated smaller (see [make_chunks.py](make_chunks.py)) before the full run.
-`htcondor_max_runtime` is set to `tomorrow` (24 h) against an expected 4 h, so
-there is a sixfold margin.
-
-## 4. Run the full analysis
-
-```bash
-reana-client create -n level4-htcondor
-export REANA_WORKON=level4-htcondor
+reana-client create -n level4
+export REANA_WORKON=level4
 reana-client upload
 reana-client start
 ```
 
 Everything runs server-side, so the local machine can be shut down once the
-workflow is `running`. Expect roughly 5 hours of wall time plus HTCondor queue
-time. Progress can be checked later from any machine with the same
-`REANA_SERVER_URL`, `REANA_ACCESS_TOKEN` and `REANA_WORKON`.
+workflow is `running`. The 43 chunk jobs are ~4 h each at the measured 45 s per
+file; wall time depends on how many run in parallel under the Kubernetes quota,
+so expect the run to take considerably longer than the ~5 h it would on
+HTCondor. Progress can be checked later from any machine with the same
+`REANA_SERVER_URL`, `REANA_ACCESS_TOKEN` and `REANA_WORKON`:
 
 ```bash
-reana-client status
+reana-client ls -w level4 'results/*'      # light; see the IncompleteRead note below
 reana-client download results/mass4l_combine_user.pdf
 ```
 
 The result should match `5500/mass4l_combine.png`, the reference plot shipped
 with [CERN Open Data record 5500](https://opendata.cern.ch/record/5500).
+
+If a chunk job is killed for out-of-memory, raise `kubernetes_memory_limit` on
+`analyze_chunk_2011` / `analyze_chunk_2012` in `workflow/Snakefile` (server max
+is 9.5Gi) and recover the run as in "Recovering from failed chunks" below.
+
+## Later: `analyze_chunk` on HTCondor
+
+HTCondor would run the 43 chunk jobs with far more parallelism than the
+Kubernetes quota allows. It does not work on **reana.cern.ch 0.9.4** today:
+
+- A Docker Hub image (`docker.io/cmsopendata/cmssw_5_3_32`) dies at once with
+  `/opt/cms/entrypoint.sh: line 17: .../CMSSW_5_3_32/src/job_wrapper.sh: No
+  such file or directory`. The image `ENTRYPOINT` `cd`s into `$CMSSW_BASE/src`
+  before the command runs, and HTCondor's relative `./job_wrapper.sh` is then
+  resolved in the wrong directory —
+  [reanahub/reana-job-controller#531](https://github.com/reanahub/reana-job-controller/issues/531).
+- A `/cvmfs/unpacked.cern.ch/...` image with `unpacked_img=True` (the
+  documented way around that, running the job via `singularity exec` instead
+  of the HTCondor Docker Universe) just sits in `running` forever with no logs
+  and is not killed by `htcondor_max_runtime`. Confirmed on 0.9.4 with a
+  one-line helloworld (`reana_htcondor_helloworld_cvmfs.yaml`) — 40 min, no
+  output — while the Docker Hub helloworld finishes in minutes.
+
+The REANA team confirmed both as a 0.9.4 bug with a fix targeted at the 0.95.0
+release. Once `reana-client info` reports a server version that ships it, set on
+both `analyze_chunk_2011` and `analyze_chunk_2012` in `workflow/Snakefile`:
+
+```python
+    container:
+        "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
+    resources:
+        compute_backend="htcondorcern",
+        htcondor_max_runtime="tomorrow",
+        unpacked_img=True
+```
+
+The Kerberos secrets are already uploaded (section 2). `htcondor_max_runtime`
+is `tomorrow` (24 h) against an expected 4 h. Note `reana-client`'s spec
+preview echoes only `compute_backend`, not the other two resources — that is
+normal. Probe one chunk first with `reana_htcondor_pilot.yaml`
+(`reana-client create -n htcondor-pilot --file reana_htcondor_pilot.yaml`,
+then `upload` / `start`); if its `DURATION_SECONDS` is far above the 45 s
+measured on Kubernetes, regenerate `workflow/chunk_lists/` smaller with
+[make_chunks.py](make_chunks.py) before the full run.
 
 ## Notes from earlier runs
 
@@ -145,10 +156,10 @@ carries the accumulated logs of every job, and CMSSW is very verbose
 same progress information in a few kilobytes and is the reliable way to monitor
 a long run.
 
-**Recovering from failed chunks.** Individual chunks can fail — preemption is a
-real risk at four hours per job. `reana-client restart -f` was observed _not_ to
-apply an updated specification, so recover by seeding a fresh workflow with the
-results that already exist:
+**Recovering from failed chunks.** Individual chunks can fail — OOM-kills or
+node evictions are a real risk at four hours per job. `reana-client restart -f`
+was observed _not_ to apply an updated specification, so recover by seeding a
+fresh workflow with the results that already exist:
 
 ```bash
 reana-client download -w <old-workflow> results/chunks
