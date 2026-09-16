@@ -24,19 +24,10 @@ default-resources:
   # executed where it lies. The resource key is a generic passthrough:
   # htcondor_submit_<key> lands in the submit description as <key>.
   htcondor_submit_transfer_executable: "False"
-  # Run the job in Iwd (the AFS working directory) instead of a scratch
-  # directory on the execution point. HTCondor's should_transfer_files
-  # defaults to IF_NEEDED, and on the CERN pool it decides "not shared"
-  # (FILESYSTEM_DOMAIN differs between access and execution point), so it
-  # runs in /pool/condor/dir_NNN and only transfers back new files in the
-  # *top level* of that scratch directory -- a rule writing results/foo.txt
-  # into a subdirectory silently loses it, which is exactly what happened:
-  # "Job ... was successful" followed by "missing locally".
-  #
-  # We know the execution point can read AFS, because with
-  # transfer_executable False it found and ran the interpreter there. Whether
-  # it can *write* to AFS is the next question: batch jobs need a Kerberos
-  # token for that, and may not have one. If this turns out to fail with a
-  # permission error, the answer is to stop pretending the filesystem is
-  # shared and switch to --shared-fs-usage none with explicit file transfer.
-  htcondor_submit_should_transfer_files: "NO"
+#
+# NOT set here, on purpose: htcondor_submit_should_transfer_files. HTCondor
+# rejects it as `invalid value ("NO") for ShouldTransferFiles` -- Snakemake
+# runs default-resources values through its own eval, and unlike "False"
+# (which becomes a real Python False) the string "NO" arrives still wrapped
+# in quotes. Not worth fighting; see HTCONDOR_DIRECT.md on why outputs in
+# subdirectories need --shared-fs-usage none instead.

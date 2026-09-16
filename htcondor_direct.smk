@@ -32,24 +32,32 @@ rule smoke:
     # No container, no CMSSW -- just: does condor_submit from lxplus via this
     # plugin reach an execution point at all, and does it have CVMFS and
     # apptainer/singularity (both required by `pilot`)?
+    #
+    # The output deliberately sits at the top level rather than in results/.
+    # HTCondor runs the job in a scratch directory on the execution point and
+    # transfers back new files from the *top level* of it; a file written into
+    # a subdirectory is silently left behind, which is what the first
+    # successful run of this rule did -- "Job was successful" followed by
+    # "missing locally". Outputs in subdirectories need --shared-fs-usage
+    # none; see HTCONDOR_DIRECT.md.
     output:
-        "results/htcondor_direct_smoke.txt",
+        "htcondor_direct_smoke.txt",
     threads: 1
     resources:
         htcondor_request_mem_mb=512,
         htcondor_request_disk_mb=1024,
     shell:
-        "mkdir -p results && "
         "{{ hostname; date; id; echo PWD=$(pwd); "
         "echo '--- cvmfs ---'; ls /cvmfs/ 2>&1 || echo 'no /cvmfs'; "
         "echo '--- apptainer/singularity ---'; "
         "(command -v apptainer || command -v singularity) 2>&1 || echo 'neither found'; "
-        "}} > results/htcondor_direct_smoke.txt"
+        "echo '--- afs ---'; ls /afs/cern.ch/user/ 2>&1 | head -3 || echo 'no /afs'; "
+        "}} > htcondor_direct_smoke.txt"
 
 
 rule pilot:
     input:
-        smoke="results/htcondor_direct_smoke.txt",
+        smoke="htcondor_direct_smoke.txt",
         data="data",
         code="code",
         calibration_file="workflow/calibration_file.txt",
