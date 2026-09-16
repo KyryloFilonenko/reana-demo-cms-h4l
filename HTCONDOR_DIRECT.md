@@ -32,10 +32,16 @@ works before trusting it with a 4h chunk.
   (see `htcondor-jobdir` in the profile). This is the main diagnostic upgrade
   over the REANA path, where a hung `/cvmfs/` job gave no way to see what
   HTCondor itself thought was happening.
-- **Assumes a shared filesystem** between lxplus and the execution point
-  (`workflow/profiles/htcondor-direct/config.yaml` doesn't set
-  `--shared-fs-usage none`). Whether that assumption holds for CERN's pool is
-  exactly what `smoke` checks.
+- **Runs in shared-filesystem mode.** The profile doesn't set
+  `--shared-fs-usage none`, and the plugin confirms it by submitting with an
+  absolute `Cmd` and `Iwd` and adding no transfer directives (verified with
+  `condor_history -long <cluster>.<proc>`: `WhenToTransferOutput` stays at
+  HTCondor's `ON_EXIT_OR_EVICT` default rather than the `ON_EXIT` the plugin
+  sets when it does intend to transfer). So the execution node must be able to
+  see the venv at its `/afs/...` path and CVMFS at `/cvmfs/...`. CVMFS is a
+  safe bet; **whether AFS is mounted on the execution nodes is the open
+  question `smoke` answers.** If it isn't, the venv has to move somewhere the
+  nodes can see, or the job has to run in container universe instead.
 
 ## Files
 
@@ -50,25 +56,39 @@ works before trusting it with a 4h chunk.
 
 ## 1. Set up on lxplus
 
-`snakemake>=8.6` needs Python >=3.11; lxplus's plain `python3` is 3.9, but
-`python3.11`/`python3.12` exist as system binaries -- use one of those to
-create the venv, not `python3`.
+`snakemake>=8.6` needs Python >=3.11, and lxplus's plain `python3` is 3.9.
+Two candidates exist, and only one of them works here:
 
-Separate venv from the REANA one, so the two don't fight over the `snakemake`
-version. Use `--copies`, not the venv default (symlinks): the plugin ships
-its own Python interpreter to the execution point as an input file, and
-transferring a *symlinked* `bin/python3.x` fails with `HoldReason: Transfer
-input files failure ... reading from file .../bin/python3.12: No such file or
-directory` (confirmed on lxplus -- the job goes straight to `held`, check with
-`condor_q -hold <cluster>.<proc>`). `--copies` makes it a real file:
+- **`/usr/bin/python3.12` (system): no.** It runs on lxplus, but the batch
+  execution nodes don't have `libpython3.12.so.1.0` installed, so the
+  interpreter cannot start there at all.
+- **LCG on CVMFS: yes.** CVMFS is mounted identically on lxplus and on the
+  execution nodes, so the same interpreter and the same libraries are visible
+  from both.
 
 ```bash
-python3.12 -m venv --copies ~/.virtualenvs/htcondor-direct
+LCG=/cvmfs/sft.cern.ch/lcg/views/LCG_110/x86_64-el9-gcc15-opt
+$LCG/bin/python3 --version          # 3.13.11
+$LCG/bin/python3 -m venv ~/.virtualenvs/htcondor-direct
 source ~/.virtualenvs/htcondor-direct/bin/activate
 pip install --upgrade pip
 pip install "snakemake>=8.6" snakemake-executor-plugin-htcondor
-ls -la ~/.virtualenvs/htcondor-direct/bin/python3.12   # must be -rwx..., not lrwx...symlink
 ```
+
+**Do not pass `--copies`.** The venv default (symlinks) is what you want, and
+`--copies` actively breaks this setup: the LCG interpreter finds its own
+`libpython` through a *relative* RPATH (`$ORIGIN/../lib`), so a copy placed in
+`~/.virtualenvs/.../bin/` looks for the library in
+`~/.virtualenvs/.../lib/`, finds nothing, and dies -- `venv --copies` itself
+fails at the `ensurepip` step with exit 127 for exactly this reason. Left as a
+symlink, `$ORIGIN` resolves through to the CVMFS `bin/` directory and the
+library is found.
+
+The matching half of this is `htcondor_submit_transfer_executable: "False"` in
+[the profile](workflow/profiles/htcondor-direct/config.yaml): the plugin never
+sets `transfer_executable`, so HTCondor's default (`True`) would copy the
+interpreter into the execution point's scratch directory and break `$ORIGIN`
+all over again. See the comment there.
 
 Confirm lxplus can talk to the pool at all, independently of REANA:
 
