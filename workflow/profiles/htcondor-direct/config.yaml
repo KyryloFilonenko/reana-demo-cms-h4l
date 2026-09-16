@@ -38,10 +38,18 @@ default-resources:
   # executed where it lies. The resource key is a generic passthrough:
   # htcondor_submit_<key> lands in the submit description as <key>.
   htcondor_submit_transfer_executable: "False"
-#
-# NOT set here, on purpose: htcondor_submit_should_transfer_files. HTCondor
-# rejects it as `invalid value ("NO") for ShouldTransferFiles` -- Snakemake
-# runs default-resources values through its own eval, and unlike "False"
-# (which becomes a real Python False) the string "NO" arrives still wrapped
-# in quotes. Not worth fighting; see HTCONDOR_DIRECT.md on why outputs in
-# subdirectories need --shared-fs-usage none instead.
+  # Run the job in Iwd -- the AFS working directory -- instead of a scratch
+  # directory. This is what makes the whole thing consistent: Snakemake
+  # launches a full remote instance on the execution point (--mode remote)
+  # with --shared-fs-usage covering input-output, so that instance expects to
+  # find `code`, `data`, `workflow/...` at paths relative to its working
+  # directory and refuses to start the rule when they aren't there. HTCondor
+  # otherwise hands it /pool/condor/dir_NNN, where nothing resolves.
+  #
+  # The double quoting is deliberate. Snakemake evaluates default-resources
+  # values as Python expressions, so YAML "NO" arrives as a bare NO that
+  # isn't valid Python and reaches HTCondor still wrapped in quotes --
+  # `invalid value ("NO") for ShouldTransferFiles`. '"NO"' survives YAML as
+  # "NO" and evaluates to the plain string. ("False" above needs no such
+  # treatment: it evaluates to a real Python False, which HTCondor accepts.)
+  htcondor_submit_should_transfer_files: '"NO"'

@@ -78,12 +78,9 @@ rule pilot:
         htcondor_request_mem_mb=8192,
         htcondor_request_disk_mb=16384,
     shell:
-        # Not $(pwd): inside the apptainer container the working directory is
-        # whatever apptainer managed to bind, which is not necessarily the
-        # HTCondor scratch directory. Only files at the top level of the
-        # scratch directory are transferred back, so address it explicitly.
-        "OUTDIR=${{_CONDOR_SCRATCH_DIR:-$(pwd)}} "
-        "&& cd $OUTDIR "
+        # With should_transfer_files NO the job runs in Iwd, so $(pwd) is the
+        # repository on AFS and the output can simply be written back into it.
+        "OUTDIR=$(pwd) "
         "&& mkdir -p work_htcondor_direct_pilot "
         "&& cd work_htcondor_direct_pilot "
         "&& source /opt/cms/cmsset_default.sh "
