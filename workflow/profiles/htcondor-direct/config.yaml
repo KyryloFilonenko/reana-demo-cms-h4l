@@ -7,6 +7,22 @@
 executor: htcondor
 jobs: 2
 htcondor-jobdir: .snakemake/htcondor
+# The access point (lxplus, /afs) and the execution points share no working
+# directory: HTCondor gives each job /pool/condor/dir_NNN. Say so, instead of
+# letting Snakemake's default assumption of a shared filesystem stand -- under
+# that assumption it launches its remote instance with --shared-fs-usage
+# covering input-output, which then looks for `code`, `data` and
+# `workflow/calibration_file.txt` relative to the scratch directory, finds
+# nothing, and aborts before the rule's command runs at all.
+#
+# With this, the plugin builds transfer_input_files / transfer_output_files
+# and the remaps that put outputs back where Snakemake expects them. It also
+# means no job ever needs to *write* to AFS, which batch jobs have no
+# Kerberos token for.
+shared-fs-usage: none
+# CVMFS is genuinely identical everywhere, so never transfer anything under
+# it -- that includes the CMSSW image the pilot runs in.
+htcondor-shared-fs-prefixes: "/cvmfs"
 software-deployment-method: apptainer
 # The execution point has /usr/bin/apptainer and a full CVMFS mount including
 # unpacked.cern.ch (confirmed by the smoke rule), but the CMSSW image has to
@@ -38,18 +54,12 @@ default-resources:
   # executed where it lies. The resource key is a generic passthrough:
   # htcondor_submit_<key> lands in the submit description as <key>.
   htcondor_submit_transfer_executable: "False"
-  # Run the job in Iwd -- the AFS working directory -- instead of a scratch
-  # directory. This is what makes the whole thing consistent: Snakemake
-  # launches a full remote instance on the execution point (--mode remote)
-  # with --shared-fs-usage covering input-output, so that instance expects to
-  # find `code`, `data`, `workflow/...` at paths relative to its working
-  # directory and refuses to start the rule when they aren't there. HTCondor
-  # otherwise hands it /pool/condor/dir_NNN, where nothing resolves.
-  #
-  # The double quoting is deliberate. Snakemake evaluates default-resources
-  # values as Python expressions, so YAML "NO" arrives as a bare NO that
-  # isn't valid Python and reaches HTCondor still wrapped in quotes --
-  # `invalid value ("NO") for ShouldTransferFiles`. '"NO"' survives YAML as
-  # "NO" and evaluates to the plain string. ("False" above needs no such
-  # treatment: it evaluates to a real Python False, which HTCondor accepts.)
-  htcondor_submit_should_transfer_files: '"NO"'
+#
+# NOT set here, and not settable: htcondor_submit_should_transfer_files.
+# Running the job in Iwd would be the other way to reconcile the working
+# directory, but HTCondor rejects every spelling of it as
+# `invalid value ("NO") for ShouldTransferFiles` -- string values coming
+# through the htcondor_submit_* passthrough arrive quoted, and the enum wants
+# a bare keyword. ("False" above works only because it evaluates to a real
+# Python False, which is not a string.) Hence the explicit-transfer mode
+# below, which is what the plugin is designed around anyway.

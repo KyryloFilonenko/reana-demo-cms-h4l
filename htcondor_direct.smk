@@ -56,12 +56,10 @@ rule smoke:
 
 
 rule pilot:
-    # Reads its inputs through absolute /afs paths and writes its output at
-    # the top level, for the reasons the smoke rule established: the job runs
-    # in /pool/condor/dir_NNN on the execution point, which can see both
-    # /cvmfs and /afs but shares no working directory with the access point.
-    # Relative input paths would resolve inside the scratch directory and find
-    # nothing; an output in results/ would never be transferred back.
+    # Every path here goes through {input.*} / {output}, never an absolute one
+    # baked in at parse time. With shared-fs-usage none the plugin transfers
+    # these into the job's scratch directory and transfers the output back, so
+    # the names Snakemake hands the shell are the ones that resolve there.
     input:
         smoke="htcondor_direct_smoke.txt",
         data="data",
@@ -69,8 +67,6 @@ rule pilot:
         calibration_file="workflow/calibration_file.txt",
     output:
         "htcondor_direct_pilot_timing.txt",
-    params:
-        submitdir=workflow.basedir,
     threads: 1
     container:
         "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
@@ -78,26 +74,27 @@ rule pilot:
         htcondor_request_mem_mb=8192,
         htcondor_request_disk_mb=16384,
     shell:
-        # With should_transfer_files NO the job runs in Iwd, so $(pwd) is the
-        # repository on AFS and the output can simply be written back into it.
-        "OUTDIR=$(pwd) "
+        # WORKDIR pins the directory Snakemake started in, because the build
+        # below cds several levels deep and {input.*} / {output} are relative
+        # to where it began.
+        "WORKDIR=$(pwd) "
         "&& mkdir -p work_htcondor_direct_pilot "
         "&& cd work_htcondor_direct_pilot "
         "&& source /opt/cms/cmsset_default.sh "
         "&& scramv1 project CMSSW CMSSW_5_3_32 "
         "&& cd CMSSW_5_3_32/src "
         "&& eval `scramv1 runtime -sh` "
-        "&& cp -r {params.submitdir}/code/HiggsExample20112012 . "
+        "&& cp -r $WORKDIR/{input.code}/HiggsExample20112012 . "
         "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
         "&& scram b "
         "&& cd ../Level4 "
-        "&& cp {params.submitdir}/workflow/calibration_file.txt this_chunk_index.txt "
+        "&& cp $WORKDIR/{input.calibration_file} this_chunk_index.txt "
         "&& sed "
         "-e 's|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/CMS_Run2012C_DoubleMuParked_AOD_22Jan2013-v1_10000_file_index.txt|this_chunk_index.txt|' "
-        "-e \"s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|{params.submitdir}/data/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|\" "
+        "-e \"s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|$WORKDIR/{input.data}/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|\" "
         "-e \"s|'HiggsDemoAnalyzer'|'HiggsDemoAnalyzerGit'|\" "
         "demoanalyzer_cfg_level4data.py > demoanalyzer_cfg_pilot.py "
         "&& START=$(date +%s) "
         "&& cmsRun demoanalyzer_cfg_pilot.py "
         "&& END=$(date +%s) "
-        '&& echo "DURATION_SECONDS=$((END-START))" | tee $OUTDIR/htcondor_direct_pilot_timing.txt'
+        '&& echo "DURATION_SECONDS=$((END-START))" | tee $WORKDIR/{output}'
