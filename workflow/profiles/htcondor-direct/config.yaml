@@ -8,6 +8,12 @@ executor: htcondor
 jobs: 2
 htcondor-jobdir: .snakemake/htcondor
 software-deployment-method: apptainer
+# The execution point has /usr/bin/apptainer and a full CVMFS mount including
+# unpacked.cern.ch (confirmed by the smoke rule), but the CMSSW image has to
+# be able to read the AOD index and the analyser source from /afs, and CMSSW
+# itself reaches into /cvmfs, so bind both explicitly rather than relying on
+# the node's apptainer defaults.
+apptainer-args: "--bind /cvmfs --bind /afs"
 default-resources:
   htcondor_request_mem_mb: 2048
   htcondor_request_disk_mb: 4096

@@ -13,9 +13,10 @@ Two ways to get `analyze_chunk` onto CERN HTCondor:
   submission code; this plugin submits jobs its own way, so it may not hit
   them at all.
 
-**This is unverified.** It has not been run against CERN's HTCondor pool. The
-`smoke` step below exists specifically to find out, cheaply, whether it even
-works before trusting it with a 4h chunk.
+**Status: `smoke` passes, `pilot` not yet run.** Job submission, execution and
+output retrieval all work against CERN's HTCondor pool (see "What it answered"
+below). Whether a real CMSSW job runs there is what `pilot` tests, and that is
+still open.
 
 ## What's different from the REANA path
 
@@ -32,16 +33,16 @@ works before trusting it with a 4h chunk.
   (see `htcondor-jobdir` in the profile). This is the main diagnostic upgrade
   over the REANA path, where a hung `/cvmfs/` job gave no way to see what
   HTCondor itself thought was happening.
-- **Runs in shared-filesystem mode.** The profile doesn't set
-  `--shared-fs-usage none`, and the plugin confirms it by submitting with an
-  absolute `Cmd` and `Iwd` and adding no transfer directives (verified with
-  `condor_history -long <cluster>.<proc>`: `WhenToTransferOutput` stays at
-  HTCondor's `ON_EXIT_OR_EVICT` default rather than the `ON_EXIT` the plugin
-  sets when it does intend to transfer). So the execution node must be able to
-  see the venv at its `/afs/...` path and CVMFS at `/cvmfs/...`. CVMFS is a
-  safe bet; **whether AFS is mounted on the execution nodes is the open
-  question `smoke` answers.** If it isn't, the venv has to move somewhere the
-  nodes can see, or the job has to run in container universe instead.
+- **The job runs in a scratch directory, not in your working directory.** The
+  plugin submits with an absolute `Cmd` and `Iwd` and adds no transfer
+  directives, i.e. it assumes a shared filesystem. HTCondor disagrees:
+  `should_transfer_files` defaults to `IF_NEEDED` and the access and execution
+  points on this pool don't share a `FILESYSTEM_DOMAIN`, so the job gets
+  `/pool/condor/dir_NNN` and only new files at the **top level** of it are
+  transferred back. Hence the two rules here read inputs through absolute
+  `/afs` paths and write their outputs at the top level. An output under
+  `results/` is silently lost -- the run reports success and then
+  "missing locally".
 
 ## Files
 
@@ -123,7 +124,7 @@ cat .snakemake/htcondor/*/*.out .snakemake/htcondor/*/*.err
 
 ```bash
 condor_history -limit 5          # confirm it shows Completed, not Removed/Held
-cat results/htcondor_direct_smoke.txt
+cat htcondor_direct_smoke.txt
 ```
 
 If `condor_q` shows the job `held` instead of progressing, get the reason before
@@ -133,21 +134,20 @@ doing anything else:
 condor_q -hold <cluster>.<proc>   # e.g. condor_q -hold 16677020.0
 ```
 
-Read `results/htcondor_direct_smoke.txt`:
+### What it answered
 
-- `--- cvmfs ---` should list `cms.cern.ch`, `unpacked.cern.ch`, etc. If it
-  says `no /cvmfs` -- the execution point has no CVMFS and `pilot` cannot
-  work as written.
-- `--- apptainer/singularity ---` must find one of the two, or `pilot`'s
-  `container:` directive has nothing to run the image with.
-- If `results/htcondor_direct_smoke.txt` never appears locally even though
-  `condor_history` shows the job Completed -- the filesystem is **not**
-  actually shared between lxplus and the execution point. Stop here and
-  switch the profile to `shared-fs-usage: none` (file-transfer mode) before
-  trying `pilot`; that's a different, more involved setup (see the plugin's
-  own docs on `--htcondor-shared-fs-prefixes`).
+Run on 2026-09-16, execution point `b9p28p6148.cern.ch`. All three checks
+passed, which is what makes `pilot` worth attempting:
 
-Only move on if all three checks above pass.
+- **CVMFS**: fully mounted, `unpacked.cern.ch` and `cms.cern.ch` among the
+  repositories -- so the CMSSW image `pilot` asks for is reachable.
+- **apptainer**: `/usr/bin/apptainer` present.
+- **AFS**: `/afs/cern.ch/user/` readable, so a job can reach the working
+  directory through an absolute path.
+
+It also showed `PWD=/pool/condor/dir_1613768`, i.e. the job runs in scratch --
+which is why both rules use absolute `/afs` paths for input and top-level
+output files.
 
 ## 3. Pilot (real CMSSW, one file)
 
@@ -164,7 +164,7 @@ rather than detaching.
 **Verify it actually ran the analysis, not just the container:**
 
 ```bash
-cat results/htcondor_direct_pilot_timing.txt   # DURATION_SECONDS=<N>
+cat htcondor_direct_pilot_timing.txt   # DURATION_SECONDS=<N>
 ```
 
 Compare `<N>` to the REANA pilot's `DURATION_SECONDS` and to the ~45 s/file
