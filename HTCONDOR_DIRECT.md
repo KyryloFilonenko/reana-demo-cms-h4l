@@ -13,10 +13,12 @@ Two ways to get `analyze_chunk` onto CERN HTCondor:
   submission code; this plugin submits jobs its own way, so it may not hit
   them at all.
 
-**Status: `smoke` passes, `pilot` not yet run.** Job submission, execution and
-output retrieval all work against CERN's HTCondor pool (see "What it answered"
-below). Whether a real CMSSW job runs there is what `pilot` tests, and that is
-still open.
+**Status: validated end to end (2026-09-16).** `pilot` ran a real CMSSW job on
+the CERN pool -- unpacked image from CVMFS under apptainer, `scram b`, an AOD
+file read over XRootD from `eospublic.cern.ch`, `DURATION_SECONDS=69` -- so the
+approach works and REANA's two `htcondorcern` bugs are indeed bypassed. What
+has *not* been done is porting the real 43-chunk workflow to it; see "If it
+works" at the end.
 
 ## What's different from the REANA path
 
@@ -183,10 +185,16 @@ rather than detaching.
 cat htcondor_direct_pilot_timing.txt   # DURATION_SECONDS=<N>
 ```
 
-Compare `<N>` to the REANA pilot's `DURATION_SECONDS` and to the ~45 s/file
-baseline measured on Kubernetes. If this file exists with a plausible number,
-the full chain worked: HTCondor submission, CVMFS image, CMSSW build, XRootD
-read from EOS, `cmsRun`.
+Compare `<N>` to the ~45 s/file baseline measured on Kubernetes. If this file
+exists with a plausible number, the full chain worked: HTCondor submission,
+CVMFS image, CMSSW build, XRootD read from EOS, `cmsRun`.
+
+Measured on 2026-09-16: `DURATION_SECONDS=69`, whole run 4 min 10 s including
+queue, input transfer and the `scram b` build. Note that 69 s covers `cmsRun`
+startup as well as the one file, and that startup is amortised across the 320
+files of a real chunk -- so this does not by itself mean chunks would take
+69/45 times longer than on Kubernetes. Measure a real chunk before resizing
+anything.
 
 ## If it works
 
