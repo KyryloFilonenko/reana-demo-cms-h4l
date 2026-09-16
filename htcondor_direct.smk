@@ -50,8 +50,8 @@ rule smoke:
 rule pilot:
     input:
         smoke="results/htcondor_direct_smoke.txt",
-        data=directory("data"),
-        code=directory("code"),
+        data="data",
+        code="code",
         calibration_file="workflow/calibration_file.txt",
     output:
         "results/htcondor_direct_pilot_timing.txt",
