@@ -78,7 +78,12 @@ rule pilot:
         htcondor_request_mem_mb=8192,
         htcondor_request_disk_mb=16384,
     shell:
-        "OUTDIR=$(pwd) "
+        # Not $(pwd): inside the apptainer container the working directory is
+        # whatever apptainer managed to bind, which is not necessarily the
+        # HTCondor scratch directory. Only files at the top level of the
+        # scratch directory are transferred back, so address it explicitly.
+        "OUTDIR=${{_CONDOR_SCRATCH_DIR:-$(pwd)}} "
+        "&& cd $OUTDIR "
         "&& mkdir -p work_htcondor_direct_pilot "
         "&& cd work_htcondor_direct_pilot "
         "&& source /opt/cms/cmsset_default.sh "

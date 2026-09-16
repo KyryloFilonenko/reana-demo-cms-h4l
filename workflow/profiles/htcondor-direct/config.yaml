@@ -13,7 +13,15 @@ software-deployment-method: apptainer
 # be able to read the AOD index and the analyser source from /afs, and CMSSW
 # itself reaches into /cvmfs, so bind both explicitly rather than relying on
 # the node's apptainer defaults.
-apptainer-args: "--bind /cvmfs --bind /afs"
+#
+# /pool matters just as much, and less obviously. HTCondor's scratch directory
+# here is /pool/condor/dir_NNN, and apptainer normally binds the current
+# working directory into the container -- but it cannot create that mount
+# point inside a read-only unpacked CVMFS image, so it silently falls back to
+# another directory. The job then still succeeds (every other path in the rule
+# is absolute) while its output lands somewhere HTCondor never transfers back:
+# "Job was successful" followed by "missing locally, parent dir not present".
+apptainer-args: "--bind /cvmfs --bind /afs --bind /pool"
 default-resources:
   htcondor_request_mem_mb: 2048
   htcondor_request_disk_mb: 4096
