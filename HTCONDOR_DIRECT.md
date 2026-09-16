@@ -149,6 +149,22 @@ It also showed `PWD=/pool/condor/dir_1613768`, i.e. the job runs in scratch --
 which is why both rules use absolute `/afs` paths for input and top-level
 output files.
 
+### CMSSW and `set -u`
+
+Snakemake runs every shell command under `set -euo pipefail`. CMSSW's
+`/opt/cms/cmsset_default.sh` reads `CMS_PATH` before assigning it, which is
+fine in an ordinary shell and fatal under `nounset`:
+
+```
+/opt/cms/cmsset_default.sh: line 33: CMS_PATH: unbound variable
+```
+
+The job then exits 127 before any analysis runs, and -- because the output
+file never appears -- HTCondor puts it on hold complaining about output
+transfer instead, which points at entirely the wrong thing. Any rule that
+sources a CMSSW environment must start with `set +u`. REANA never hit this;
+its job wrapper doesn't set `-u`.
+
 ## 3. Pilot (real CMSSW, one file)
 
 ```bash

@@ -74,10 +74,17 @@ rule pilot:
         htcondor_request_mem_mb=8192,
         htcondor_request_disk_mb=16384,
     shell:
+        # set +u first, and not optionally: Snakemake runs every shell command
+        # under `set -euo pipefail`, and CMSSW's /opt/cms/cmsset_default.sh
+        # reads CMS_PATH at line 33 before assigning it. Harmless in an
+        # ordinary shell, fatal under nounset -- "CMS_PATH: unbound variable",
+        # exit 127, before any of the analysis runs. REANA never hit this
+        # because its job wrapper doesn't set -u.
+        "set +u "
         # WORKDIR pins the directory Snakemake started in, because the build
         # below cds several levels deep and {input.*} / {output} are relative
         # to where it began.
-        "WORKDIR=$(pwd) "
+        "&& WORKDIR=$(pwd) "
         "&& mkdir -p work_htcondor_direct_pilot "
         "&& cd work_htcondor_direct_pilot "
         "&& source /opt/cms/cmsset_default.sh "
