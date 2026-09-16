@@ -50,13 +50,24 @@ works before trusting it with a 4h chunk.
 
 ## 1. Set up on lxplus
 
+`snakemake>=8.6` needs Python >=3.11; lxplus's plain `python3` is 3.9, but
+`python3.11`/`python3.12` exist as system binaries -- use one of those to
+create the venv, not `python3`.
+
 Separate venv from the REANA one, so the two don't fight over the `snakemake`
-version:
+version. Use `--copies`, not the venv default (symlinks): the plugin ships
+its own Python interpreter to the execution point as an input file, and
+transferring a *symlinked* `bin/python3.x` fails with `HoldReason: Transfer
+input files failure ... reading from file .../bin/python3.12: No such file or
+directory` (confirmed on lxplus -- the job goes straight to `held`, check with
+`condor_q -hold <cluster>.<proc>`). `--copies` makes it a real file:
 
 ```bash
-python3 -m venv ~/.virtualenvs/htcondor-direct
+python3.12 -m venv --copies ~/.virtualenvs/htcondor-direct
 source ~/.virtualenvs/htcondor-direct/bin/activate
+pip install --upgrade pip
 pip install "snakemake>=8.6" snakemake-executor-plugin-htcondor
+ls -la ~/.virtualenvs/htcondor-direct/bin/python3.12   # must be -rwx..., not lrwx...symlink
 ```
 
 Confirm lxplus can talk to the pool at all, independently of REANA:
@@ -93,6 +104,13 @@ cat .snakemake/htcondor/*/*.out .snakemake/htcondor/*/*.err
 ```bash
 condor_history -limit 5          # confirm it shows Completed, not Removed/Held
 cat results/htcondor_direct_smoke.txt
+```
+
+If `condor_q` shows the job `held` instead of progressing, get the reason before
+doing anything else:
+
+```bash
+condor_q -hold <cluster>.<proc>   # e.g. condor_q -hold 16677020.0
 ```
 
 Read `results/htcondor_direct_smoke.txt`:
