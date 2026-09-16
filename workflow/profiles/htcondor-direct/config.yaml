@@ -1,0 +1,15 @@
+# Snakemake profile for running htcondor_direct.smk straight against CERN
+# HTCondor with `snakemake-executor-plugin-htcondor`, bypassing REANA
+# entirely. Unverified -- see HTCONDOR_DIRECT.md for how to test it and what
+# to check first (CVMFS + apptainer on the execution point, whether the
+# filesystem is actually shared between lxplus and the worker).
+#
+# Usage:
+#   snakemake -s htcondor_direct.smk --workflow-profile workflow/profiles/htcondor-direct --jobs 2 -p smoke
+executor: htcondor
+jobs: 2
+htcondor-jobdir: .snakemake/htcondor
+software-deployment-method: apptainer
+default-resources:
+  htcondor_request_mem_mb: 2048
+  htcondor_request_disk_mb: 4096

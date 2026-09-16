@@ -109,7 +109,10 @@ is 9.5Gi) and recover the run as in "Recovering from failed chunks" below.
 ## Later: `analyze_chunk` on HTCondor
 
 HTCondor would run the 43 chunk jobs with far more parallelism than the
-Kubernetes quota allows. It does not work on **reana.cern.ch 0.9.4** today:
+Kubernetes quota allows. It does not work through REANA on
+**reana.cern.ch 0.9.4** today (an alternative that skips REANA entirely --
+`snakemake-executor-plugin-htcondor` -- is being tried separately; see
+[HTCONDOR_DIRECT.md](HTCONDOR_DIRECT.md)):
 
 - A Docker Hub image (`docker.io/cmsopendata/cmssw_5_3_32`) dies at once with
   `/opt/cms/entrypoint.sh: line 17: .../CMSSW_5_3_32/src/job_wrapper.sh: No
