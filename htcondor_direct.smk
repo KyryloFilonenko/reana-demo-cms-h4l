@@ -20,7 +20,15 @@
 # workflow/calibration_file.txt, so problems surface in minutes, not after a
 # 4h chunk.
 
+JSON_2011 = "Cert_160404-180252_7TeV_ReRecoNov08_Collisions11_JSON.txt"
 JSON_2012 = "Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt"
+
+# Unpacked on CVMFS, so it is identical on lxplus and on every execution
+# node and never has to be pulled or transferred.
+CMSSW_IMAGE = (
+    "/cvmfs/unpacked.cern.ch/registry.hub.docker.com"
+    "/cmsopendata/cmssw_5_3_32:latest"
+)
 
 
 rule all:
@@ -69,7 +77,7 @@ rule pilot:
         "htcondor_direct_pilot_timing.txt",
     threads: 1
     container:
-        "/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmsopendata/cmssw_5_3_32:latest"
+        CMSSW_IMAGE
     resources:
         htcondor_request_mem_mb=8192,
         htcondor_request_disk_mb=16384,
@@ -105,3 +113,237 @@ rule pilot:
         "&& cmsRun demoanalyzer_cfg_pilot.py "
         "&& END=$(date +%s) "
         '&& echo "DURATION_SECONDS=$((END-START))" | tee $WORKDIR/{output}'
+
+
+# ---------------------------------------------------------------------------
+# The real Level 4 workflow on HTCondor, without REANA.
+#
+# Same analysis as workflow/Snakefile (variant A, the validated REANA path),
+# but with the 43 analyze_chunk jobs going to the CERN pool through this
+# plugin. That file is left alone on purpose: it produced the result we
+# checked against the reference plot, and it should stay reproducible.
+#
+# Run it with the `level4` target -- `rule all` above stays pointed at the
+# pilot, so a bare `snakemake` can't start a two-day run by accident:
+#
+#   snakemake -s htcondor_direct.smk \
+#     --workflow-profile workflow/profiles/htcondor-direct --jobs 20 level4
+#
+# Read the "Full run" section of HTCONDOR_DIRECT.md before starting one.
+
+import os
+
+CHUNK_LISTS = os.path.join(workflow.basedir, "workflow", "chunk_lists")
+
+# Derived from the chunk list files rather than hard-coded. workflow/Snakefile
+# spells these out because reana-client serialises each rule to JSON and
+# chokes on anything dynamic; nothing here goes through REANA, so the
+# filesystem can be the source of truth.
+CHUNKS = {
+    dataset: sorted(
+        name[: -len(".txt")]
+        for name in os.listdir(os.path.join(CHUNK_LISTS, dataset))
+        if name.endswith(".txt")
+    )
+    for dataset in sorted(os.listdir(CHUNK_LISTS))
+}
+
+JSON_BY_DATASET = {
+    "DoubleMu_Run2011A": JSON_2011,
+    "DoubleElectron_Run2011A": JSON_2011,
+    "DoubleMuParked_Run2012B": JSON_2012,
+    "DoubleMuParked_Run2012C": JSON_2012,
+    "DoubleElectron_Run2012B": JSON_2012,
+    "DoubleElectron_Run2012C": JSON_2012,
+}
+
+ALL_CHUNK_ROOTS = [
+    f"results/chunks/{dataset}/{chunk_id}.root"
+    for dataset, chunk_ids in CHUNKS.items()
+    for chunk_id in chunk_ids
+]
+
+# Everything except analyze_chunk runs on lxplus: seconds of work each, and
+# they share the CMSSW build area in the working directory, which would have
+# to be shipped to a node otherwise. lxplus has apptainer and CVMFS, so the
+# container directive still applies to them.
+localrules:
+    level4,
+    scram,
+    merge_dataset,
+    combine_2012_muon,
+    combine_2012_electron,
+    make_plot,
+
+
+rule level4:
+    input:
+        "results/mass4l_combine_user.pdf",
+
+
+rule scram:
+    input:
+        data="data",
+        code="code",
+    output:
+        touch("results/scramdone.txt"),
+        directory("CMSSW_5_3_32"),
+    container:
+        CMSSW_IMAGE
+    shell:
+        "set +u "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& scramv1 project CMSSW CMSSW_5_3_32 "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& cp -r ../../{input.code}/HiggsExample20112012 . "
+        "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
+        "&& scram b "
+        "&& mkdir -p ../../../../results"
+
+
+rule analyze_chunk:
+    # The one rule that goes to HTCondor. One job per chunk list, 43 in total.
+    #
+    # workflow/Snakefile splits this in two by year because a params lambda
+    # isn't JSON-serialisable for reana-client; here a lambda is fine, so the
+    # validation JSON is just looked up per dataset.
+    input:
+        data="data",
+        code="code",
+        chunk_list="workflow/chunk_lists/{dataset}/{chunk_id}.txt",
+    output:
+        "results/chunks/{dataset}/{chunk_id}.root",
+    params:
+        json=lambda wildcards: JSON_BY_DATASET[wildcards.dataset],
+    threads: 1
+    container:
+        CMSSW_IMAGE
+    resources:
+        htcondor_request_mem_mb=8192,
+        htcondor_request_disk_mb=16384,
+        # CERN's pool defaults to the espresso flavour, 20 minutes, which
+        # would kill a chunk several hours in. Set as a rule resource rather
+        # than in the profile: the plugin quotes classad string values itself,
+        # and a value routed through the profile's YAML picks up a second
+        # layer of quoting on the way (the same thing that made
+        # should_transfer_files unusable).
+        classad_JobFlavour="tomorrow",
+    shell:
+        "set +u "
+        "&& WORKDIR=$(pwd) "
+        "&& mkdir -p work_{wildcards.dataset}_{wildcards.chunk_id} "
+        "&& cd work_{wildcards.dataset}_{wildcards.chunk_id} "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& scramv1 project CMSSW CMSSW_5_3_32 "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& cp -r $WORKDIR/{input.code}/HiggsExample20112012 . "
+        "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
+        "&& scram b "
+        "&& cd ../Level4 "
+        "&& mkdir -p $WORKDIR/results/chunks/{wildcards.dataset} "
+        "&& cp $WORKDIR/{input.chunk_list} this_chunk_index.txt "
+        "&& sed "
+        "-e 's|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/CMS_Run2012C_DoubleMuParked_AOD_22Jan2013-v1_10000_file_index.txt|this_chunk_index.txt|' "
+        "-e \"s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/Cert_190456-208686_8TeV_22Jan2013ReReco_Collisions12_JSON.txt|$WORKDIR/{input.data}/{params.json}|\" "
+        "-e \"s|'HiggsDemoAnalyzer'|'HiggsDemoAnalyzerGit'|\" "
+        "demoanalyzer_cfg_level4data.py > demoanalyzer_cfg_level4data_chunk.py "
+        "&& cmsRun demoanalyzer_cfg_level4data_chunk.py "
+        "&& cp *.root $WORKDIR/{output}"
+
+
+rule merge_dataset:
+    # One rule with a wildcard instead of workflow/Snakefile's six unrolled
+    # copies -- again, the reason for unrolling them there was reana-client's
+    # JSON serialisation, which doesn't apply here.
+    input:
+        scramdone="results/scramdone.txt",
+        cmssw="CMSSW_5_3_32",
+        chunks=lambda wildcards: expand(
+            "results/chunks/{dataset}/{chunk_id}.root",
+            dataset=wildcards.dataset,
+            chunk_id=CHUNKS[wildcards.dataset],
+        ),
+    output:
+        "results/{dataset}_full.root",
+    wildcard_constraints:
+        dataset="|".join(CHUNKS),
+    container:
+        CMSSW_IMAGE
+    shell:
+        "set +u "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../results/chunks/{wildcards.dataset}/*.root"
+
+
+# The analysis reads the 4mu and 2mu2e final states from the DoubleMu(Parked)
+# primary datasets and the 4e final state from DoubleElectron, to avoid
+# double-counting from overlapping triggers. 2012 has two eras per primary
+# dataset to combine; 2011 has only era A, so its merge output is used as is.
+
+rule combine_2012_muon:
+    input:
+        b="results/DoubleMuParked_Run2012B_full.root",
+        c="results/DoubleMuParked_Run2012C_full.root",
+        scramdone="results/scramdone.txt",
+        cmssw="CMSSW_5_3_32",
+    output:
+        "results/DoubleMu12_combined.root",
+    container:
+        CMSSW_IMAGE
+    shell:
+        "set +u "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../{input.b} ../../{input.c}"
+
+
+rule combine_2012_electron:
+    input:
+        b="results/DoubleElectron_Run2012B_full.root",
+        c="results/DoubleElectron_Run2012C_full.root",
+        scramdone="results/scramdone.txt",
+        cmssw="CMSSW_5_3_32",
+    output:
+        "results/DoubleE12_combined.root",
+    container:
+        CMSSW_IMAGE
+    shell:
+        "set +u "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& hadd -f ../../{output} ../../{input.b} ../../{input.c}"
+
+
+rule make_plot:
+    input:
+        data="data",
+        code="code",
+        scramdone="results/scramdone.txt",
+        cmssw="CMSSW_5_3_32",
+        mu12="results/DoubleMu12_combined.root",
+        e12="results/DoubleE12_combined.root",
+        mu11="results/DoubleMu_Run2011A_full.root",
+        e11="results/DoubleElectron_Run2011A_full.root",
+    output:
+        "results/mass4l_combine_user.pdf",
+    container:
+        CMSSW_IMAGE
+    shell:
+        "set +u "
+        "&& source /opt/cms/cmsset_default.sh "
+        "&& cd CMSSW_5_3_32/src "
+        "&& eval `scramv1 runtime -sh` "
+        "&& cd HiggsExample20112012/Level4 "
+        "&& cp ../../../../{input.data}/*.root . "
+        "&& cp ../../../../{input.mu12} DoubleMu12.root "
+        "&& cp ../../../../{input.e12} DoubleE12.root "
+        "&& cp ../../../../{input.mu11} DoubleMu11.root "
+        "&& cp ../../../../{input.e11} DoubleE11.root "
+        "&& root -b -l -q ./M4Lnormdatall.cc "
+        "&& cp mass4l_combine_user.pdf ../../../../{output}"

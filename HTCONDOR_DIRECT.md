@@ -196,6 +196,69 @@ files of a real chunk -- so this does not by itself mean chunks would take
 69/45 times longer than on Kubernetes. Measure a real chunk before resizing
 anything.
 
+## 4. Full run
+
+`htcondor_direct.smk` also carries the whole Level 4 workflow, under the
+`level4` target. Only `analyze_chunk` goes to HTCondor -- 43 jobs, one per
+chunk list. `scram`, `merge_dataset`, the two `combine_2012_*` rules and
+`make_plot` are `localrules`: seconds of work each, and they share the CMSSW
+build area in the working directory, which would otherwise have to be shipped
+to a node. lxplus has apptainer and CVMFS, so they still run in the container.
+
+`rule all` stays pointed at the pilot, so a bare `snakemake` cannot start a
+two-day run by accident -- name the target explicitly.
+
+### First: one chunk, not all of them
+
+Chunk outputs go to `results/chunks/<dataset>/<chunk_id>.root`, a
+**subdirectory**, which the pilot never exercised. In `shared-fs-usage none`
+mode the plugin is supposed to handle this with `transfer_output_remaps`, but
+that is untested here. Verify with a single chunk before committing to 43:
+
+```bash
+snakemake -s htcondor_direct.smk   --workflow-profile workflow/profiles/htcondor-direct   --jobs 1 -p results/chunks/DoubleMu_Run2011A/chunk_0000.root
+```
+
+If that file appears locally, subdirectory outputs work and the full run is
+safe to start. If it doesn't, the remaps aren't doing what they should, and
+the fallback is to have the rule write a flat top-level name and move it into
+place in a local rule.
+
+### Then the full run
+
+```bash
+tmux new -s level4-htcondor
+snakemake -s htcondor_direct.smk   --workflow-profile workflow/profiles/htcondor-direct   --jobs 20 --keep-going level4
+```
+
+`--keep-going` matters: one bad chunk shouldn't stop the other 42.
+
+### What has to survive a multi-day run
+
+Nothing supervises this from a server, unlike REANA. Two things will end the
+run if ignored:
+
+- **The `snakemake` process.** In `tmux` or `screen`, always. Detach with
+  `Ctrl+b` then `d`; reattach with `tmux attach -t level4-htcondor`.
+- **The Kerberos ticket**, which lasts about 25 hours and is what lets jobs
+  reach AFS. A run longer than that needs it renewed -- `kinit -R` from cron,
+  or `k5reauth -f -i 3600 -- snakemake ...` wrapping the whole run.
+
+### The chunks are already there
+
+`results/chunks/` on lxplus holds all 43 chunk files from the REANA run. If
+they're in place, Snakemake will consider `analyze_chunk` done and go
+straight to the merges -- correct behaviour, but it means nothing reaches
+HTCondor. To actually exercise the farm, move them aside first:
+
+```bash
+mv results/chunks results/chunks.reana
+```
+
+Keep them: they are a validated reference. Comparing a HTCondor-produced
+chunk against its REANA counterpart is the strongest check available that
+this path computes the same thing.
+
 ## If it works
 
 Only after `pilot` succeeds is it worth adapting the real 43-job
