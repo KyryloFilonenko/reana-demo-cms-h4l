@@ -63,6 +63,26 @@ rule smoke:
         "}} > htcondor_direct_smoke.txt"
 
 
+rule smoke_subdir:
+    # Does an output in a *subdirectory* come back? The plugin is supposed to
+    # arrange that with transfer_output_remaps under shared-fs-usage none, but
+    # `smoke` only ever proved it for a top-level file, and every chunk of the
+    # real workflow writes to results/chunks/<dataset>/<chunk>.root.
+    #
+    # Worth its own two-minute job: the alternative is discovering the answer
+    # four hours into a real chunk.
+    output:
+        "results/smoke_subdir/htcondor_direct_subdir.txt",
+    threads: 1
+    resources:
+        htcondor_request_mem_mb=512,
+        htcondor_request_disk_mb=1024,
+    shell:
+        "mkdir -p results/smoke_subdir "
+        "&& {{ hostname; date; echo PWD=$(pwd); "
+        "echo 'wrote {output}'; }} > {output}"
+
+
 rule pilot:
     # Every path here goes through {input.*} / {output}, never an absolute one
     # baked in at parse time. With shared-fs-usage none the plugin transfers
