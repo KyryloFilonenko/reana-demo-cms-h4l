@@ -190,6 +190,7 @@ ALL_CHUNK_ROOTS = [
 localrules:
     level4,
     scram,
+    stage_chunk,
     merge_dataset,
     combine_2012_muon,
     combine_2012_electron,
@@ -233,9 +234,19 @@ rule analyze_chunk:
         code="code",
         chunk_list="workflow/chunk_lists/{dataset}/{chunk_id}.txt",
     output:
-        "results/chunks/{dataset}/{chunk_id}.root",
+        # Flat, and at the top level, because an output inside a subdirectory
+        # does not survive the trip back: HTCondor looks for it at
+        # <scratch>/results/chunks/... and finds nothing, and the job ends up
+        # held on "Transfer output files failure". Proven with a two-minute
+        # smoke_subdir job rather than four hours into a real chunk. The
+        # top-level case is what the pilot exercised and it works, so write
+        # there and let stage_chunk put the file in its place afterwards.
+        temp("chunk__{dataset}__{chunk_id}.root"),
     params:
         json=lambda wildcards: JSON_BY_DATASET[wildcards.dataset],
+    wildcard_constraints:
+        dataset="|".join(CHUNKS),
+        chunk_id=r"chunk_\d+",
     threads: 1
     container:
         CMSSW_IMAGE
@@ -262,7 +273,6 @@ rule analyze_chunk:
         "&& cd HiggsExample20112012/HiggsDemoAnalyzer "
         "&& scram b "
         "&& cd ../Level4 "
-        "&& mkdir -p $WORKDIR/results/chunks/{wildcards.dataset} "
         "&& cp $WORKDIR/{input.chunk_list} this_chunk_index.txt "
         "&& sed "
         "-e 's|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/CMS_Run2012C_DoubleMuParked_AOD_22Jan2013-v1_10000_file_index.txt|this_chunk_index.txt|' "
@@ -271,6 +281,21 @@ rule analyze_chunk:
         "demoanalyzer_cfg_level4data.py > demoanalyzer_cfg_level4data_chunk.py "
         "&& cmsRun demoanalyzer_cfg_level4data_chunk.py "
         "&& cp *.root $WORKDIR/{output}"
+
+
+rule stage_chunk:
+    # Local, instant: put the flat file analyze_chunk had to produce into
+    # the layout everything downstream expects, which is also the layout
+    # the REANA run produced, so the two can be compared file by file.
+    input:
+        "chunk__{dataset}__{chunk_id}.root",
+    output:
+        "results/chunks/{dataset}/{chunk_id}.root",
+    wildcard_constraints:
+        dataset="|".join(CHUNKS),
+        chunk_id=r"chunk_\d+",
+    shell:
+        "mkdir -p $(dirname {output}) && cp {input} {output}"
 
 
 rule merge_dataset:

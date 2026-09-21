@@ -208,21 +208,27 @@ to a node. lxplus has apptainer and CVMFS, so they still run in the container.
 `rule all` stays pointed at the pilot, so a bare `snakemake` cannot start a
 two-day run by accident -- name the target explicitly.
 
-### First: one chunk, not all of them
+### Outputs in subdirectories don't come back
 
-Chunk outputs go to `results/chunks/<dataset>/<chunk_id>.root`, a
-**subdirectory**, which the pilot never exercised. In `shared-fs-usage none`
-mode the plugin is supposed to handle this with `transfer_output_remaps`, but
-that is untested here. Verify with a single chunk before committing to 43:
+Chunk results belong in `results/chunks/<dataset>/<chunk_id>.root`, but an
+output inside a subdirectory does not survive the trip back from the execution
+point. HTCondor looks for it at `<scratch>/results/chunks/...`, finds nothing,
+and the job goes to `held` with "Transfer output files failure" -- most likely
+because Snakemake moves outputs into its own `--local-storage-prefix` before
+HTCondor's transfer runs. `transfer_output_remaps` does not save it.
+
+So `analyze_chunk` writes a flat `chunk__<dataset>__<chunk_id>.root` at the
+top level, which is the case the pilot proved works, and the local
+`stage_chunk` rule moves it into place afterwards. The flat file is `temp()`,
+so it doesn't accumulate.
+
+The `smoke_subdir` rule is kept as a two-minute regression test for this. If a
+future plugin version fixes it, that rule will start passing and
+`analyze_chunk` can write directly where it belongs:
 
 ```bash
-snakemake -s htcondor_direct.smk   --workflow-profile workflow/profiles/htcondor-direct   --jobs 1 -p results/chunks/DoubleMu_Run2011A/chunk_0000.root
+snakemake -s htcondor_direct.smk   --workflow-profile workflow/profiles/htcondor-direct   --jobs 1 -p results/smoke_subdir/htcondor_direct_subdir.txt
 ```
-
-If that file appears locally, subdirectory outputs work and the full run is
-safe to start. If it doesn't, the remaps aren't doing what they should, and
-the fallback is to have the rule write a flat top-level name and move it into
-place in a local rule.
 
 ### Then the full run
 
