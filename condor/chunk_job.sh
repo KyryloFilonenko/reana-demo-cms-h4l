@@ -76,10 +76,29 @@ sed -e "s|/home/cms-opendata/CMSSW_5_3_32/src/Demo/DemoAnalyzer/datasets/CMS_Run
     -e "s|'HiggsDemoAnalyzer'|'HiggsDemoAnalyzerGit'|" \
     demoanalyzer_cfg_level4data.py > demoanalyzer_cfg_chunk.py
 
+# cmsRun's own output is never allowed near the job's stderr. CMSSW's
+# MessageLogger runs at INFO with no limit and produces hundreds of megabytes
+# per chunk -- 712 MB after 90 minutes, measured. HTCondor transfers the job's
+# stderr back to the submit directory on AFS at the end, so 43 chunks would
+# mean tens of gigabytes landing in a home directory with a ~10 GB quota,
+# taking the ROOT file's transfer down with it. Keep it on the node's scratch
+# disk and report only the tail.
+CMSRUN_LOG="$SCRATCH/cmsrun_${DATASET}_${CHUNK_ID}.log"
+
 START=$(date +%s)
-cmsRun demoanalyzer_cfg_chunk.py
-END=$(date +%s)
-echo "=== cmsRun finished in $((END - START)) s ==="
+if cmsRun demoanalyzer_cfg_chunk.py > "$CMSRUN_LOG" 2>&1; then
+    END=$(date +%s)
+    echo "=== cmsRun finished in $((END - START)) s ==="
+    echo "=== last 40 lines of cmsRun output ($(wc -l < "$CMSRUN_LOG") lines total) ==="
+    tail -40 "$CMSRUN_LOG"
+else
+    status=$?
+    END=$(date +%s)
+    echo "=== cmsRun FAILED with status $status after $((END - START)) s ===" >&2
+    echo "=== last 200 lines of cmsRun output ===" >&2
+    tail -200 "$CMSRUN_LOG" >&2
+    exit $status
+fi
 
 # Top level of the scratch directory, which is the only place HTCondor
 # transfers new files back from.
