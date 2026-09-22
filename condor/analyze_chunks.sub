@@ -4,9 +4,17 @@
 #   mkdir -p condor_out condor_logs
 #   condor_submit condor/analyze_chunks.sub
 #
+# To submit a subset -- one chunk to prove the setup, or the ones that
+# failed -- point chunklist at another file with the same format. It can't
+# be done by appending a second `queue`: condor_submit refuses two.
+#
+#   condor_submit condor/analyze_chunks.sub -append 'chunklist = condor/one.txt'
+#
 # Then log out freely. Collect the results later with
 # condor/collect_chunks.sh and run the short merge/combine/plot steps
 # locally. See HTCONDOR_DIRECT.md.
+
+chunklist = condor/chunks.txt
 
 universe     = vanilla
 executable   = condor/chunk_job.sh
@@ -47,4 +55,4 @@ output = condor_logs/$(dataset)_$(chunk_id).out
 error  = condor_logs/$(dataset)_$(chunk_id).err
 log    = condor_logs/analyze_chunks.log
 
-queue dataset, chunk_id from condor/chunks.txt
+queue dataset, chunk_id from $(chunklist)
