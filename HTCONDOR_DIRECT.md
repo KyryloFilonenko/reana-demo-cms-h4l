@@ -337,8 +337,11 @@ and submit them the same way:
 
 ```bash
 ./condor/collect_chunks.sh | awk '/^MISSING/ {print $2}'   | sed -E 's|results/chunks/([^/]+)/(chunk_[0-9]+)\.root|, |' > condor/retry.txt
-condor_submit condor/analyze_chunks.sub -append "queue dataset, chunk_id from condor/retry.txt"
+condor_submit condor/analyze_chunks.sub -append 'chunklist = condor/retry.txt'
 ```
+
+The list is a submit macro rather than an appended `queue` statement:
+`condor_submit` refuses two `queue` statements in one submission.
 
 ## If it works
 
