@@ -32,6 +32,7 @@ echo "moved $moved file(s)"
 
 total=0
 missing=0
+: > condor/retry.txt
 while IFS=, read -r dataset chunk_id; do
     dataset=$(echo "$dataset" | tr -d ' ')
     chunk_id=$(echo "$chunk_id" | tr -d ' ')
@@ -39,8 +40,17 @@ while IFS=, read -r dataset chunk_id; do
     total=$((total + 1))
     if [ ! -s "results/chunks/$dataset/$chunk_id.root" ]; then
         echo "MISSING results/chunks/$dataset/$chunk_id.root"
+        echo "$dataset, $chunk_id" >> condor/retry.txt
         missing=$((missing + 1))
     fi
 done < condor/chunks.txt
 
 echo "$((total - missing))/$total chunks present"
+
+# Written every time, so it is always current: resubmit exactly what is left
+# with condor_submit condor/analyze_chunks.sub -append 'chunklist = condor/retry.txt'
+if [ "$missing" -gt 0 ]; then
+    echo "wrote condor/retry.txt with $missing chunk(s) to resubmit"
+else
+    rm -f condor/retry.txt
+fi

@@ -332,11 +332,11 @@ Result: `results/mass4l_combine_user.pdf`.
 
 ### Re-submitting failures
 
-`collect_chunks.sh` lists the chunks still missing. Put those lines in a file
-and submit them the same way:
+`collect_chunks.sh` writes `condor/retry.txt` with whatever is still
+missing, every time it runs, so it is always current:
 
 ```bash
-./condor/collect_chunks.sh | awk '/^MISSING/ {print $2}'   | sed -E 's|results/chunks/([^/]+)/(chunk_[0-9]+)\.root|, |' > condor/retry.txt
+./condor/collect_chunks.sh
 condor_submit condor/analyze_chunks.sub -append 'chunklist = condor/retry.txt'
 ```
 
