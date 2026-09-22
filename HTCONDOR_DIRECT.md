@@ -265,6 +265,81 @@ Keep them: they are a validated reference. Comparing a HTCondor-produced
 chunk against its REANA counterpart is the strongest check available that
 this path computes the same thing.
 
+## Variant A2: no live dispatcher (use this for a real run)
+
+**lxplus9 kills tmux and screen sessions on logout**
+([CERN/HSF analysis essentials](https://hsf-training.github.io/analysis-essentials/shell-extras/persistent-screen.html)),
+and a Snakemake dispatcher dies with them. A 43-chunk run takes a day or
+more, so it cannot be supervised from lxplus at all. Observed directly: a
+single chunk submitted at 21:27 lost its dispatcher on logout, left a 0-byte
+Snakemake log, and the job itself was removed at 06:44 elapsed -- most likely
+when its delegated Kerberos credential lapsed with the session.
+
+HTCondor jobs, by contrast, survive logout by design. The 43 chunks are
+independent, so they don't need a DAG engine at all: submit them as plain
+jobs, collect the files afterwards, and run only the short merge/combine/plot
+steps locally, which take minutes and need no supervision.
+
+### Files
+
+- [`condor/chunk_job.sh`](condor/chunk_job.sh) -- one chunk. Re-enters itself
+  inside the CMSSW container (`apptainer exec`, binding `/cvmfs` and the
+  scratch directory), builds the analyser, runs `cmsRun`, writes one flat
+  file at the top level of the scratch directory.
+- [`condor/chunks.txt`](condor/chunks.txt) -- the 43 `dataset, chunk_id`
+  pairs, generated from `workflow/chunk_lists/`.
+- [`condor/analyze_chunks.sub`](condor/analyze_chunks.sub) -- the submit
+  description. `tomorrow` flavour (the pool defaults to espresso, 20 minutes),
+  8GB, 16GB disk, two retries.
+- [`condor/collect_chunks.sh`](condor/collect_chunks.sh) -- moves finished
+  files into `results/chunks/<dataset>/`, reports what is still missing. Safe
+  to run repeatedly while jobs are still going.
+
+Jobs are deliberately self-contained: the analyser source, both validation
+JSONs and the chunk's file list are transferred in, and the AOD files are read
+over XRootD from `eospublic`, which is public. Nothing touches AFS, so no
+credential has to stay valid for a job to survive.
+
+### Run it
+
+```bash
+cd ~/reana-demo-cms-h4l
+mkdir -p condor_out condor_logs
+condor_submit condor/analyze_chunks.sub
+```
+
+Then log out. Nothing on lxplus needs to stay alive.
+
+Check back with:
+
+```bash
+condor_q
+condor_q -hold                      # if anything is stuck, get the reason
+./condor/collect_chunks.sh          # moves what's done, lists what isn't
+```
+
+### Finish locally
+
+Once `collect_chunks.sh` reports 43/43:
+
+```bash
+snakemake -s htcondor_direct.smk --cores 1   --software-deployment-method apptainer   --apptainer-args "--bind /cvmfs --bind /afs"   level4
+```
+
+Everything left is a `localrule` -- `scram`, the merges, the two combines and
+`make_plot` -- so this runs on lxplus in minutes with no dispatcher to lose.
+Result: `results/mass4l_combine_user.pdf`.
+
+### Re-submitting failures
+
+`collect_chunks.sh` lists the chunks still missing. Put those lines in a file
+and submit them the same way:
+
+```bash
+./condor/collect_chunks.sh | awk '/^MISSING/ {print $2}'   | sed -E 's|results/chunks/([^/]+)/(chunk_[0-9]+)\.root|, |' > condor/retry.txt
+condor_submit condor/analyze_chunks.sub -append "queue dataset, chunk_id from condor/retry.txt"
+```
+
 ## If it works
 
 Only after `pilot` succeeds is it worth adapting the real 43-job
