@@ -13,9 +13,14 @@ Two ways to get `analyze_chunk` onto CERN HTCondor:
   submission code; this plugin submits jobs its own way, so it may not hit
   them at all.
 
-**Status: the full Level 4 analysis has been run this way (2026-09-23).** All
-43 chunks were computed on the CERN pool as plain HTCondor jobs, collected,
-and merged into `results/mass4l_combine_user.pdf` -- so REANA's two
+**Status: the full Level 4 analysis has been run this way (2026-09-23), and
+the result is identical to the REANA one.** All 43 chunks were computed on the
+CERN pool as plain HTCondor jobs, collected, and merged into
+`results/mass4l_combine_user.pdf`. Every one of the 42 chunks that has a REANA
+counterpart matches it **byte for byte**, and the final PDF is the same 17977
+bytes as the one from `level4-recovery`. (The 43rd, `DoubleMuParked_Run2012C/
+chunk_0006`, has no counterpart to compare against: it is precisely the chunk
+that was OOM-killed at 4Gi during the REANA run.) So REANA's two
 `htcondorcern` bugs are bypassed, not worked around.
 
 Use **Variant A2** below for a real run. The Snakemake-executor route further
