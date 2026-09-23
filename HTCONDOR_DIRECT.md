@@ -13,12 +13,15 @@ Two ways to get `analyze_chunk` onto CERN HTCondor:
   submission code; this plugin submits jobs its own way, so it may not hit
   them at all.
 
-**Status: validated end to end (2026-09-16).** `pilot` ran a real CMSSW job on
-the CERN pool -- unpacked image from CVMFS under apptainer, `scram b`, an AOD
-file read over XRootD from `eospublic.cern.ch`, `DURATION_SECONDS=69` -- so the
-approach works and REANA's two `htcondorcern` bugs are indeed bypassed. What
-has *not* been done is porting the real 43-chunk workflow to it; see "If it
-works" at the end.
+**Status: the full Level 4 analysis has been run this way (2026-09-23).** All
+43 chunks were computed on the CERN pool as plain HTCondor jobs, collected,
+and merged into `results/mass4l_combine_user.pdf` -- so REANA's two
+`htcondorcern` bugs are bypassed, not worked around.
+
+Use **Variant A2** below for a real run. The Snakemake-executor route further
+up is where the ground was mapped and is worth reading for that, but it cannot
+survive a multi-day run from lxplus: see the note on lxplus9 killing sessions
+on logout.
 
 ## What's different from the REANA path
 
@@ -309,6 +312,13 @@ condor_submit condor/analyze_chunks.sub
 ```
 
 Then log out. Nothing on lxplus needs to stay alive.
+
+Measured on the real run: one chunk is about 4h20m (`cmsRun finished in
+15744 s` for 320 files), and all 43 finished inside a day with nothing
+supervising them. Two points are worth submitting one chunk first for, since
+both were found that way and both would have been expensive across 43 jobs:
+the flat-output-plus-collect mechanics, and the size of what CMSSW writes to
+stderr.
 
 Check back with:
 
